@@ -21,7 +21,7 @@ def keep_alive():
     t.start()
 
 # API Anahtarları
-GROQ_API_KEY = os.environ.get("Grox_api")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 DISCORD_TOKEN = os.environ.get("Discord_Token")
 
 groq_client = Groq(api_key=GROQ_API_KEY)
@@ -614,7 +614,7 @@ async def ask(interaction: discord.Interaction, soru: str):
     await interaction.response.defer()
     try:
         if not GROQ_API_KEY:
-            await interaction.followup.send("Groq API anahtarı bulunamadı! Render'da `Grox_api` env değişkenini kontrol et.")
+            await interaction.followup.send("Groq API anahtarı bulunamadı! Render'da `GROQ_API_KEY` env değişkenini kontrol et.")
             return
 
         chat_completion = groq_client.chat.completions.create(
@@ -862,4 +862,3 @@ if __name__ == "__main__":
         print("HATA: Discord Token bulunamadı! Render'da `Discord_Token` env değişkenini ayarlayın.")
     else:
         client.run(DISCORD_TOKEN)
-        
