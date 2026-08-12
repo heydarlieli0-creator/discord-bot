@@ -862,3 +862,4 @@ if __name__ == "__main__":
         print("HATA: Discord Token bulunamadı! Render'da `Discord_Token` env değişkenini ayarlayın.")
     else:
         client.run(DISCORD_TOKEN)
+        
