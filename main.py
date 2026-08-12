@@ -796,3 +796,51 @@ async def yazitura(interaction: discord.Interaction, secim: app_commands.Choice[
 # Botu Çalıştır
 keep_alive()
 client.run(DISCORD_TOKEN)
+import discord
+from discord.ext import commands
+import json
+import os
+import json
+import os
+
+# XP verilerini tutacak dosya yolu
+XP_FILE = "user_xp.json"
+
+def load_xp():
+    if not os.path.exists(XP_FILE):
+        return {}
+    with open(XP_FILE, "r") as f:
+        return json.load(f)
+
+def save_xp(data):
+    with open(XP_FILE, "w") as f:
+        json.dump(data, f, indent=4)
+
+@bot.event
+async def on_message(message):
+    if message.author.bot:
+        return
+
+    # Mevcut koduna dokunmamak için komutları çalıştırmaya devam et
+    await bot.process_commands(message)
+
+    # XP Sistemi
+    user_id = str(message.author.id)
+    xp_data = load_xp()
+
+    if user_id not in xp_data:
+        xp_data[user_id] = {"xp": 0, "level": 1}
+
+    # +5 XP Ekle
+    xp_data[user_id]["xp"] += 5
+    
+    # Seviye atlama mantığı: Sınır = Seviye * 300
+    current_xp = xp_data[user_id]["xp"]
+    level_limit = xp_data[user_id]["level"] * 300
+
+    if current_xp >= level_limit:
+        xp_data[user_id]["level"] += 1
+        xp_data[user_id]["xp"] = 0 # Bir sonraki seviyeye sıfırdan başla
+        await message.channel.send(f"Tebrikler {message.author.mention}! {xp_data[user_id]['level']}. seviyeye ulaştın!")
+
+    save_xp(xp_data)
