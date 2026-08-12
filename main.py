@@ -1,4 +1,3 @@
-
 import os
 import random
 import threading
@@ -39,7 +38,6 @@ tree = app_commands.CommandTree(client)
 # Sayı tahmin oyunu için hafıza
 aktif_oyunlar = {}
 
-# Bilgi Yarışması Soruları
 TRIVIA_SORULARI = [
     # ==================== ANİME (280 soru) ====================
     {"soru": "Naruto'nun en iyi arkadaşı kimdir?", "dogru": "Sasuke Uchiha", "secenekler": ["Sakura Haruno", "Sasuke Uchiha", "Kakashi Hatake", "Shikamaru Nara"]},
@@ -587,11 +585,27 @@ TRIVIA_SORULARI = [
 ]
 
 
+
+
 @client.event
 async def on_ready():
     await tree.sync()
     print(f"Logged in as {client.user} (ID: {client.user.id})")
     print("Bot hazır!")
+
+
+# Global hata yakalayıcı
+@tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    print(f"Komut hatası: {error}")
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send("Bir hata oluştu, lütfen tekrar dene.", ephemeral=True)
+        else:
+            await interaction.response.send_message("Bir hata oluştu, lütfen tekrar dene.", ephemeral=True)
+    except:
+        pass
+
 
 # --- YAPAY ZEKA SOHBETİ ---
 @tree.command(name="ask", description="Yapay zekaya soru sorarsın.")
@@ -599,11 +613,15 @@ async def on_ready():
 async def ask(interaction: discord.Interaction, soru: str):
     await interaction.response.defer()
     try:
+        if not GROQ_API_KEY:
+            await interaction.followup.send("Groq API anahtarı bulunamadı! Render'da `Grox_api` env değişkenini kontrol et.")
+            return
+
         chat_completion = groq_client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model="openai/gpt-oss-20b",
             messages=[
                 {
-                    "role": "system", 
+                    "role": "system",
                     "content": "Sen kibar, tarafsız, net ve profesyonel bir Discord asistanısın. Aşırı samimi hitaplar kullanma, küfür etme, doğrudan ve anlaşılır cevaplar ver."
                 },
                 {"role": "user", "content": soru},
@@ -611,10 +629,11 @@ async def ask(interaction: discord.Interaction, soru: str):
         )
         response_text = chat_completion.choices[0].message.content
         if len(response_text) > 2000:
-            response_text = response_text[:1997] + "..."
-        await interaction.followup.send(f"**Soru:** {soru}\n\n{response_text}")
+            response_text = response_text[:1993] + "\n..."
+        await interaction.followup.send(response_text)
     except Exception as e:
-        await interaction.followup.send("İşlem sırasında bir hata oluştu.")
+        print(f"/ask hatası: {e}")
+        await interaction.followup.send(f"Bir hata oluştu: {e}")
 
 
 # ================= OYUNLAR =================
@@ -628,19 +647,23 @@ async def ask(interaction: discord.Interaction, soru: str):
 ])
 async def tkm(interaction: discord.Interaction, secim: app_commands.Choice[str]):
     await interaction.response.defer()
-    bot_secimi = random.choice(["taş", "kağıt", "makas"])
-    kullanici_secimi = secim.value
+    try:
+        bot_secimi = random.choice(["taş", "kağıt", "makas"])
+        kullanici_secimi = secim.value
 
-    if kullanici_secimi == bot_secimi:
-        sonuc = "🤝 **Berabere.**"
-    elif ((kullanici_secimi == "taş" and bot_secimi == "makas") or
-          (kullanici_secimi == "kağıt" and bot_secimi == "taş") or
-          (kullanici_secimi == "makas" and bot_secimi == "kağıt")):
-        sonuc = "🎉 **Tebrikler, kazandınız!**"
-    else:
-        sonuc = "😢 **Kaybettiniz.**"
+        if kullanici_secimi == bot_secimi:
+            sonuc = "🤝 **Berabere.**"
+        elif ((kullanici_secimi == "taş" and bot_secimi == "makas") or
+              (kullanici_secimi == "kağıt" and bot_secimi == "taş") or
+              (kullanici_secimi == "makas" and bot_secimi == "kağıt")):
+            sonuc = "🎉 **Tebrikler, kazandınız!**"
+        else:
+            sonuc = "😢 **Kaybettiniz.**"
 
-    await interaction.followup.send(f"Seçiminiz: **{kullanici_secimi}**\nBotun seçimi: **{bot_secimi}**\n\n{sonuc}")
+        await interaction.followup.send(f"Seçiminiz: **{kullanici_secimi}**\nBotun seçimi: **{bot_secimi}**\n\n{sonuc}")
+    except Exception as e:
+        print(f"/tkm hatası: {e}")
+        await interaction.followup.send("Bir hata oluştu.")
 
 
 # 2. OYUN: Sayı Tahmin (1-100)
@@ -648,45 +671,54 @@ async def tkm(interaction: discord.Interaction, secim: app_commands.Choice[str])
 @app_commands.describe(sayi="1-100 arası bir sayı girin")
 async def tahmin(interaction: discord.Interaction, sayi: int):
     await interaction.response.defer()
-    user_id = interaction.user.id
-    if user_id not in aktif_oyunlar:
-        aktif_oyunlar[user_id] = random.randint(1, 100)
+    try:
+        user_id = interaction.user.id
+        if user_id not in aktif_oyunlar:
+            aktif_oyunlar[user_id] = random.randint(1, 100)
 
-    gizli = aktif_oyunlar[user_id]
-    if sayi == gizli:
-        del aktif_oyunlar[user_id]
-        await interaction.followup.send(f"🎉 **Tebrikler!** Doğru sayı **{gizli}** idi.")
-    elif sayi < gizli:
-        await interaction.followup.send("📈 Daha **büyük** bir sayı deneyin.")
-    else:
-        await interaction.followup.send("📉 Daha **küçük** bir sayı deneyin.")
+        gizli = aktif_oyunlar[user_id]
+        if sayi == gizli:
+            del aktif_oyunlar[user_id]
+            await interaction.followup.send(f"🎉 **Tebrikler!** Doğru sayı **{gizli}** idi.")
+        elif sayi < gizli:
+            await interaction.followup.send("📈 Daha **büyük** bir sayı deneyin.")
+        else:
+            await interaction.followup.send("📉 Daha **küçük** bir sayı deneyin.")
+    except Exception as e:
+        print(f"/tahmin hatası: {e}")
+        await interaction.followup.send("Bir hata oluştu.")
 
 
 # 3. OYUN: Slot Makinesi
 @tree.command(name="slot", description="Slot makinesini çevirip şansınızı denersiniz.")
 async def slot(interaction: discord.Interaction):
     await interaction.response.defer()
-    semboller = ["🍒", "🍋", "🍊", "🔔", "⭐", "💎"]
-    c1 = random.choice(semboller)
-    c2 = random.choice(semboller)
-    c3 = random.choice(semboller)
+    try:
+        semboller = ["🍒", "🍋", "🍊", "🔔", "⭐", "💎"]
+        c1 = random.choice(semboller)
+        c2 = random.choice(semboller)
+        c3 = random.choice(semboller)
 
-    sonuc_metni = f"🎰 **[ {c1} | {c2} | {c3} ]** 🎰\n\n"
-    if c1 == c2 == c3:
-        sonuc_metni += "🏆 **Büyük İkramiye! Üçlü eşleşti, kazandınız!**"
-    elif c1 == c2 or c2 == c3 or c1 == c3:
-        sonuc_metni += "✨ **İkili eşleşti! Fena değil.**"
-    else:
-        sonuc_metni += "❌ **Kaybettiniz, şansınızı tekrar deneyin.**"
+        sonuc_metni = f"🎰 **[ {c1} | {c2} | {c3} ]** 🎰\n\n"
+        if c1 == c2 == c3:
+            sonuc_metni += "🏆 **Büyük İkramiye! Üçlü eşleşti, kazandınız!**"
+        elif c1 == c2 or c2 == c3 or c1 == c3:
+            sonuc_metni += "✨ **İkili eşleşti! Fena değil.**"
+        else:
+            sonuc_metni += "❌ **Kaybettiniz, şansınızı tekrar deneyin.**"
 
-    await interaction.followup.send(sonuc_metni)
+        await interaction.followup.send(sonuc_metni)
+    except Exception as e:
+        print(f"/slot hatası: {e}")
+        await interaction.followup.send("Bir hata oluştu.")
 
 
 # 4. OYUN: Butonlu Bilgi Yarışması
 class BilgiYarismasiView(discord.ui.View):
-    def __init__(self, dogru_cevap):
+    def __init__(self, dogru_cevap, secenekler):
         super().__init__(timeout=30)
         self.dogru_cevap = dogru_cevap
+        self.secenekler_listesi = secenekler
 
     @discord.ui.button(label="A", style=discord.ButtonStyle.blurple)
     async def secenek_a(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -705,73 +737,98 @@ class BilgiYarismasiView(discord.ui.View):
         await self.kontrol(interaction, button.label)
 
     async def kontrol(self, interaction: discord.Interaction, secilen_harf):
-        harf_index = {"A": 0, "B": 1, "C": 2, "D": 3}
-        secilen_metin = self.secenekler_listesi[harf_index[secilen_harf]]
+        try:
+            harf_index = {"A": 0, "B": 1, "C": 2, "D": 3}
+            secilen_metin = self.secenekler_listesi[harf_index[secilen_harf]]
 
-        if secilen_metin == self.dogru_cevap:
-            await interaction.response.send_message(f"🎉 **Tebrikler {interaction.user.name}, doğru cevap!** (`{self.dogru_cevap}`)", ephemeral=False)
-        else:
-            await interaction.response.send_message(f"❌ **Yanlış cevap!** Doğru cevap: **{self.dogru_cevap}** olmalıydı.", ephemeral=True)
+            if secilen_metin == self.dogru_cevap:
+                await interaction.response.send_message(
+                    f"🎉 **Tebrikler {interaction.user.name}, doğru cevap!** (`{self.dogru_cevap}`)",
+                    ephemeral=False
+                )
+            else:
+                await interaction.response.send_message(
+                    f"❌ **Yanlış cevap!** Doğru cevap: **{self.dogru_cevap}** olmalıydı.",
+                    ephemeral=True
+                )
 
-        for child in self.children:
-            child.disabled = True
-        await interaction.message.edit(view=self)
+            for child in self.children:
+                child.disabled = True
+            await interaction.message.edit(view=self)
+        except Exception as e:
+            print(f"View hatası: {e}")
+            try:
+                await interaction.response.send_message("Bir hata oluştu.", ephemeral=True)
+            except:
+                pass
+
 
 @tree.command(name="bilgi-yarismasi", description="Butonlu genel kültür bilgi yarışması başlatır.")
 async def bilgi_yarismasi(interaction: discord.Interaction):
     await interaction.response.defer()
-    veri = random.choice(TRIVIA_SORULARI)
-    dogru = veri["dogru"]
-    secenekler = veri["secenekler"]
-    random.shuffle(secenekler)
+    try:
+        veri = random.choice(TRIVIA_SORULARI)
+        dogru = veri["dogru"]
+        secenekler = list(veri["secenekler"])
+        random.shuffle(secenekler)
 
-    view = BilgiYarismasiView(dogru)
-    view.secenekler_listesi = secenekler
+        view = BilgiYarismasiView(dogru, secenekler)
 
-    metin = (
-        f"🧠 **BİLGİ YARIŞMASI**\n\n"
-        f"❓ **Soru:** {veri['soru']}\n\n"
-        f"A) {secenekler[0]}\n"
-        f"B) {secenekler[1]}\n"
-        f"C) {secenekler[2]}\n"
-        f"D) {secenekler[3]}\n\n"
-        f"*Aşağıdaki butonlardan doğru şıkkı seç!*"
-    )
-    await interaction.followup.send(metin, view=view)
+        metin = (
+            f"🧠 **BİLGİ YARIŞMASI**\n\n"
+            f"❓ **Soru:** {veri['soru']}\n\n"
+            f"A) {secenekler[0]}\n"
+            f"B) {secenekler[1]}\n"
+            f"C) {secenekler[2]}\n"
+            f"D) {secenekler[3]}\n\n"
+            f"*Aşağıdaki butonlardan doğru şıkkı seç!*"
+        )
+        await interaction.followup.send(metin, view=view)
+    except Exception as e:
+        print(f"/bilgi-yarismasi hatası: {e}")
+        await interaction.followup.send("Bir hata oluştu.")
 
 
-# 5. OYUN: Kasa Açma (Şans Oyunu)
+# 5. OYUN: Kasa Açma
 @tree.command(name="kasa-ac", description="Gizli bir kasa açarak içinden ne çıkacağını görürsün.")
 async def kasa_ac(interaction: discord.Interaction):
     await interaction.response.defer()
-    oduller = [
-        "Boş çıktı! 🕸️",
-        "10 Altın kazandın! 🪙",
-        "Efsanevi Kılıç çıktı! 🗡️",
-        "Lanetli Taş çıktı, puanın silindi! 💀",
-        "100 Elmas kazandın! 💎",
-        "Küçük bir iksir buldun! 🧪"
-    ]
-    cikan = random.choice(oduller)
-    await interaction.followup.send(f"📦 **Kasa açılıyor...**\n\nİçinden çıkan: **{cikan}**")
+    try:
+        oduller = [
+            "Boş çıktı! 🕸️",
+            "10 Altın kazandın! 🪙",
+            "Efsanevi Kılıç çıktı! 🗡️",
+            "Lanetli Taş çıktı, puanın silindi! 💀",
+            "100 Elmas kazandın! 💎",
+            "Küçük bir iksir buldun! 🧪"
+        ]
+        cikan = random.choice(oduller)
+        await interaction.followup.send(f"📦 **Kasa açılıyor...**\n\nİçinden çıkan: **{cikan}**")
+    except Exception as e:
+        print(f"/kasa-ac hatası: {e}")
+        await interaction.followup.send("Bir hata oluştu.")
 
 
 # 6. OYUN: Zar Düellosu
 @tree.command(name="zardüellosu", description="Bot ile zar düellosu yaparsınız (Büyük atan kazanır).")
 async def zardüellosu(interaction: discord.Interaction):
     await interaction.response.defer()
-    oyuncu_zar = random.randint(1, 6)
-    bot_zar = random.randint(1, 6)
+    try:
+        oyuncu_zar = random.randint(1, 6)
+        bot_zar = random.randint(1, 6)
 
-    metin = f"🎲 Senin attığın zar: **{oyuncu_zar}**\n🤖 Benim attığım zar: **{bot_zar}**\n\n"
-    if oyuncu_zar > bot_zar:
-        metin += "🎉 **Düelloyu kazandın!**"
-    elif oyuncu_zar < bot_zar:
-        metin += "😢 **Düelloyu kaybettin!**"
-    else:
-        metin += "🤝 **Zarlar eşit, berabere!**"
+        metin = f"🎲 Senin attığın zar: **{oyuncu_zar}**\n🤖 Benim attığım zar: **{bot_zar}**\n\n"
+        if oyuncu_zar > bot_zar:
+            metin += "🎉 **Düelloyu kazandın!**"
+        elif oyuncu_zar < bot_zar:
+            metin += "😢 **Düelloyu kaybettin!**"
+        else:
+            metin += "🤝 **Zarlar eşit, berabere!**"
 
-    await interaction.followup.send(metin)
+        await interaction.followup.send(metin)
+    except Exception as e:
+        print(f"/zardüellosu hatası: {e}")
+        await interaction.followup.send("Bir hata oluştu.")
 
 
 # 7. OYUN: Yazı Tura
@@ -782,65 +839,26 @@ async def zardüellosu(interaction: discord.Interaction):
 ])
 async def yazitura(interaction: discord.Interaction, secim: app_commands.Choice[str]):
     await interaction.response.defer()
-    sonuc = random.choice(["yazı", "tura"])
-    kullanici_secimi = secim.value
+    try:
+        sonuc = random.choice(["yazı", "tura"])
+        kullanici_secimi = secim.value
 
-    if kullanici_secimi == sonuc:
-        durum = f"🪙 Para **{sonuc.upper()}** geldi! Kazandınız!"
-    else:
-        durum = f"🪙 Para **{sonuc.upper()}** geldi! Kaybettiniz."
+        if kullanici_secimi == sonuc:
+            durum = f"🪙 Para **{sonuc.upper()}** geldi! Kazandınız!"
+        else:
+            durum = f"🪙 Para **{sonuc.upper()}** geldi! Kaybettiniz."
 
-    await interaction.followup.send(durum)
+        await interaction.followup.send(durum)
+    except Exception as e:
+        print(f"/yazitura hatası: {e}")
+        await interaction.followup.send("Bir hata oluştu.")
 
 
 # Botu Çalıştır
 keep_alive()
-client.run(DISCORD_TOKEN)
-import discord
-from discord.ext import commands
-import json
-import os
-import json
-import os
 
-# XP verilerini tutacak dosya yolu
-XP_FILE = "user_xp.json"
-
-def load_xp():
-    if not os.path.exists(XP_FILE):
-        return {}
-    with open(XP_FILE, "r") as f:
-        return json.load(f)
-
-def save_xp(data):
-    with open(XP_FILE, "w") as f:
-        json.dump(data, f, indent=4)
-
-@bot.event
-async def on_message(message):
-    if message.author.bot:
-        return
-
-    # Mevcut koduna dokunmamak için komutları çalıştırmaya devam et
-    await bot.process_commands(message)
-
-    # XP Sistemi
-    user_id = str(message.author.id)
-    xp_data = load_xp()
-
-    if user_id not in xp_data:
-        xp_data[user_id] = {"xp": 0, "level": 1}
-
-    # +5 XP Ekle
-    xp_data[user_id]["xp"] += 5
-    
-    # Seviye atlama mantığı: Sınır = Seviye * 300
-    current_xp = xp_data[user_id]["xp"]
-    level_limit = xp_data[user_id]["level"] * 300
-
-    if current_xp >= level_limit:
-        xp_data[user_id]["level"] += 1
-        xp_data[user_id]["xp"] = 0 # Bir sonraki seviyeye sıfırdan başla
-        await message.channel.send(f"Tebrikler {message.author.mention}! {xp_data[user_id]['level']}. seviyeye ulaştın!")
-
-    save_xp(xp_data)
+if __name__ == "__main__":
+    if not DISCORD_TOKEN:
+        print("HATA: Discord Token bulunamadı! Render'da `Discord_Token` env değişkenini ayarlayın.")
+    else:
+        client.run(DISCORD_TOKEN)
