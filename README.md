@@ -1,0 +1,2 @@
+# discord-bot
+Swenaxin kolesi
