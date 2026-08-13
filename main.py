@@ -1,6 +1,7 @@
 import os
 import random
 import threading
+import json
 from flask import Flask
 import discord
 from discord import app_commands
@@ -37,6 +38,45 @@ tree = app_commands.CommandTree(client)
 
 # Sayı tahmin oyunu için hafıza
 aktif_oyunlar = {}
+
+# ================= SEVİYE SİSTEMİ =================
+SEVIYE_DOSYASI = "seviyeler.json"
+BASLANGIC_SEVIYE_XP = 300  # 1. seviyeden 2. seviyeye geçmek için gereken xp
+SEVIYE_XP_ARTISI = 300     # Her seviye atlandığında gereken xp bu kadar artar
+
+
+def seviye_verisi_yukle():
+    if os.path.exists(SEVIYE_DOSYASI):
+        try:
+            with open(SEVIYE_DOSYASI, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Seviye verisi okunamadı: {e}")
+            return {}
+    return {}
+
+
+def seviye_verisi_kaydet():
+    try:
+        with open(SEVIYE_DOSYASI, "w", encoding="utf-8") as f:
+            json.dump(seviye_verileri, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"Seviye verisi kaydedilemedi: {e}")
+
+
+seviye_verileri = seviye_verisi_yukle()
+
+
+def kullanici_verisi_al(user_id):
+    uid = str(user_id)
+    if uid not in seviye_verileri:
+        seviye_verileri[uid] = {
+            "xp": 0,
+            "seviye": 1,
+            "sonraki_seviye_xp": BASLANGIC_SEVIYE_XP,
+            "mesaj_sayisi": 0,
+        }
+    return seviye_verileri[uid]
 
 TRIVIA_SORULARI = [
     # ==================== ANİME (280 soru) ====================
@@ -594,6 +634,34 @@ async def on_ready():
     print("Bot hazır!")
 
 
+@client.event
+async def on_message(message):
+    # Botların kendi mesajlarını ve DM'leri sayma
+    if message.author.bot or message.guild is None:
+        return
+
+    try:
+        veri = kullanici_verisi_al(message.author.id)
+        veri["xp"] += 5
+        veri["mesaj_sayisi"] += 1
+
+        seviye_atladi = False
+        while veri["xp"] >= veri["sonraki_seviye_xp"]:
+            veri["xp"] -= veri["sonraki_seviye_xp"]
+            veri["seviye"] += 1
+            veri["sonraki_seviye_xp"] += SEVIYE_XP_ARTISI
+            seviye_atladi = True
+
+        seviye_verisi_kaydet()
+
+        if seviye_atladi:
+            await message.channel.send(
+                f"🎉 Tebrikler {message.author.mention}, **Seviye {veri['seviye']}**'e yükseldin!"
+            )
+    except Exception as e:
+        print(f"Seviye sistemi hatası: {e}")
+
+
 # Global hata yakalayıcı
 @tree.error
 async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
@@ -634,6 +702,26 @@ async def ask(interaction: discord.Interaction, soru: str):
     except Exception as e:
         print(f"/ask hatası: {e}")
         await interaction.followup.send(f"Bir hata oluştu: {e}")
+
+
+# --- SEVİYE SİSTEMİ KOMUTU ---
+@tree.command(name="seviye", description="Seviyeni, XP'ni ve mesaj sayını gösterir.")
+@app_commands.describe(kullanici="Seviyesini görmek istediğin kişi (boş bırakırsan kendini gösterir)")
+async def seviye(interaction: discord.Interaction, kullanici: discord.Member = None):
+    await interaction.response.defer()
+    try:
+        hedef = kullanici or interaction.user
+        veri = kullanici_verisi_al(hedef.id)
+        metin = (
+            f"📊 **{hedef.display_name}** için istatistikler\n\n"
+            f"🏆 Seviye: **{veri['seviye']}**\n"
+            f"✨ XP: **{veri['xp']} / {veri['sonraki_seviye_xp']}**\n"
+            f"💬 Mesaj sayısı: **{veri['mesaj_sayisi']}**"
+        )
+        await interaction.followup.send(metin)
+    except Exception as e:
+        print(f"/seviye hatası: {e}")
+        await interaction.followup.send("Bir hata oluştu.")
 
 
 # ================= OYUNLAR =================
