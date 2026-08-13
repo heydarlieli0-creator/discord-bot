@@ -89,6 +89,24 @@ def toplam_xp_hesapla(veri):
     seviye = veri["seviye"]
     return 300 * (seviye - 1) * seviye // 2 + veri["xp"]
 
+
+def seviye_atlama_embed(member, yeni_seviye):
+    """AmariBot tarzı seviye atlama embed'i oluşturur."""
+    sonraki_rol_seviye = ((yeni_seviye // 5) + 1) * 5
+
+    embed = discord.Embed(
+        title=f"{member.display_name} level up!",
+        description=(
+            f"You just advanced to **level {yeni_seviye}**!\n"
+            f"You'll earn a role when you reach **level {sonraki_rol_seviye}**."
+        ),
+        color=0x57F287
+    )
+    embed.set_thumbnail(url=member.display_avatar.url)
+    embed.set_footer(text="Seviye Sistemi", icon_url=member.display_avatar.url)
+    return embed
+
+
 TRIVIA_SORULARI = [
     # ==================== ANİME (280 soru) ====================
     {"soru": "Naruto'nun en iyi arkadaşı kimdir?", "dogru": "Sasuke Uchiha", "secenekler": ["Sakura Haruno", "Sasuke Uchiha", "Kakashi Hatake", "Shikamaru Nara"]},
@@ -689,9 +707,8 @@ async def on_message(message):
                 f"🎁 {message.author.mention}, günlük ödülünü aldın: **+{kazanilan_xp} XP**!"
             )
             if seviye_atladi:
-                await message.channel.send(
-                    f"🎉 Tebrikler {message.author.mention}, **Seviye {veri['seviye']}**'e yükseldin!"
-                )
+                embed = seviye_atlama_embed(message.author, veri["seviye"])
+                await message.channel.send(embed=embed)
         except Exception as e:
             print(f"!köledailyxp hatası: {e}")
         return
@@ -715,9 +732,8 @@ async def on_message(message):
         seviye_verisi_kaydet()
 
         if seviye_atladi:
-            await message.channel.send(
-                f"🎉 Tebrikler {message.author.mention}, **Seviye {veri['seviye']}**'e yükseldin!"
-            )
+            embed = seviye_atlama_embed(message.author, veri["seviye"])
+            await message.channel.send(embed=embed)
     except Exception as e:
         print(f"Seviye sistemi hatası: {e}")
 
