@@ -2,6 +2,7 @@ import os
 import random
 import threading
 import json
+import time
 from flask import Flask
 import discord
 from discord import app_commands
@@ -75,8 +76,18 @@ def kullanici_verisi_al(user_id):
             "seviye": 1,
             "sonraki_seviye_xp": BASLANGIC_SEVIYE_XP,
             "mesaj_sayisi": 0,
+            "son_daily": 0,
         }
+    # Eskiden oluşturulmuş kayıtlarda son_daily alanı eksikse ekle
+    if "son_daily" not in seviye_verileri[uid]:
+        seviye_verileri[uid]["son_daily"] = 0
     return seviye_verileri[uid]
+
+
+def toplam_xp_hesapla(veri):
+    """Sıralama için: seviye + mevcut xp'yi tek bir sayıya çevirir."""
+    seviye = veri["seviye"]
+    return 300 * (seviye - 1) * seviye // 2 + veri["xp"]
 
 TRIVIA_SORULARI = [
     # ==================== ANİME (280 soru) ====================
@@ -640,6 +651,55 @@ async def on_message(message):
     if message.author.bot or message.guild is None:
         return
 
+    icerik = message.content.strip()
+
+    # ---- !köledailyxp günlük xp komutu ----
+    if icerik.lower() == "!köledailyxp":
+        try:
+            veri = kullanici_verisi_al(message.author.id)
+            simdi = time.time()
+            son_daily = veri.get("son_daily", 0)
+            bekleme_suresi = 24 * 60 * 60  # 24 saat
+            fark = simdi - son_daily
+
+            if fark < bekleme_suresi:
+                kalan = int(bekleme_suresi - fark)
+                saat = kalan // 3600
+                dakika = (kalan % 3600) // 60
+                await message.channel.send(
+                    f"⏳ {message.author.mention}, günlük ödülünü zaten aldın! "
+                    f"Tekrar almak için **{saat} saat {dakika} dakika** beklemen gerekiyor."
+                )
+                return
+
+            kazanilan_xp = random.randint(350, 750)
+            veri["xp"] += kazanilan_xp
+            veri["son_daily"] = simdi
+
+            seviye_atladi = False
+            while veri["xp"] >= veri["sonraki_seviye_xp"]:
+                veri["xp"] -= veri["sonraki_seviye_xp"]
+                veri["seviye"] += 1
+                veri["sonraki_seviye_xp"] += SEVIYE_XP_ARTISI
+                seviye_atladi = True
+
+            seviye_verisi_kaydet()
+
+            await message.channel.send(
+                f"🎁 {message.author.mention}, günlük ödülünü aldın: **+{kazanilan_xp} XP**!"
+            )
+            if seviye_atladi:
+                await message.channel.send(
+                    f"🎉 Tebrikler {message.author.mention}, **Seviye {veri['seviye']}**'e yükseldin!"
+                )
+        except Exception as e:
+            print(f"!köledailyxp hatası: {e}")
+        return
+
+    # "!" ile başlayan diğer mesajlara mesaj xp'si verme
+    if icerik.startswith("!"):
+        return
+
     try:
         veri = kullanici_verisi_al(message.author.id)
         veri["xp"] += 5
@@ -721,6 +781,36 @@ async def seviye(interaction: discord.Interaction, kullanici: discord.Member = N
         await interaction.followup.send(metin)
     except Exception as e:
         print(f"/seviye hatası: {e}")
+        await interaction.followup.send("Bir hata oluştu.")
+
+
+@tree.command(name="sıralama", description="Seviye sıralama tablosunu gösterir (ilk 10 kişi).")
+async def siralama(interaction: discord.Interaction):
+    await interaction.response.defer()
+    try:
+        if not seviye_verileri:
+            await interaction.followup.send("Henüz kimse XP kazanmamış.")
+            return
+
+        siralanmis = sorted(
+            seviye_verileri.items(),
+            key=lambda item: toplam_xp_hesapla(item[1]),
+            reverse=True,
+        )[:10]
+
+        madalyalar = ["🥇", "🥈", "🥉"]
+        satirlar = []
+        for i, (uid, veri) in enumerate(siralanmis):
+            sira_simge = madalyalar[i] if i < 3 else f"**{i + 1}.**"
+            satirlar.append(
+                f"{sira_simge} <@{uid}> — Seviye **{veri['seviye']}** "
+                f"({veri['xp']}/{veri['sonraki_seviye_xp']} XP, {veri['mesaj_sayisi']} mesaj)"
+            )
+
+        metin = "🏆 **SIRALAMA TABLOSU** 🏆\n\n" + "\n".join(satirlar)
+        await interaction.followup.send(metin)
+    except Exception as e:
+        print(f"/sıralama hatası: {e}")
         await interaction.followup.send("Bir hata oluştu.")
 
 
