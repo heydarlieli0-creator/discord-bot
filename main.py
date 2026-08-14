@@ -25,6 +25,7 @@ def keep_alive():
 # API Anahtarları
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 DISCORD_TOKEN = os.environ.get("Discord_Token")
+SEVIYE_KANAL_ID = os.environ.get("SEVIYE_KANAL_ID")  # Seviye atlama mesajlarının gideceği kanal ID'si
 
 groq_client = Groq(api_key=GROQ_API_KEY)
 
@@ -86,6 +87,19 @@ def kullanici_verisi_al(user_id):
 def toplam_xp_hesapla(veri):
     seviye = veri["seviye"]
     return 300 * (seviye - 1) * seviye // 2 + veri["xp"]
+
+
+def seviye_mesaj_kanali_al(varsayilan_kanal):
+    """SEVIYE_KANAL_ID ayarlıysa o kanalı döndürür, yoksa mesajın atıldığı kanalı döndürür."""
+    if SEVIYE_KANAL_ID:
+        try:
+            kanal = client.get_channel(int(SEVIYE_KANAL_ID))
+            if kanal is not None:
+                return kanal
+            print(f"SEVIYE_KANAL_ID ({SEVIYE_KANAL_ID}) bulunamadı, mesajın atıldığı kanala düşülüyor.")
+        except ValueError:
+            print(f"SEVIYE_KANAL_ID geçerli bir sayı değil: {SEVIYE_KANAL_ID}")
+    return varsayilan_kanal
 
 
 async def seviye_rolu_ver(member, yeni_seviye):
@@ -752,7 +766,8 @@ async def on_message(message):
             if seviye_atladi:
                 kazanilan_rol = await seviye_rolu_ver(message.author, veri["seviye"])
                 embed = seviye_atlama_embed(message.author, veri["seviye"], kazanilan_rol)
-                await message.channel.send(embed=embed)
+                hedef_kanal = seviye_mesaj_kanali_al(message.channel)
+                await hedef_kanal.send(embed=embed)
         except Exception as e:
             print(f"!köledailyxp hatası: {e}")
         return
@@ -778,7 +793,8 @@ async def on_message(message):
         if seviye_atladi:
             kazanilan_rol = await seviye_rolu_ver(message.author, veri["seviye"])
             embed = seviye_atlama_embed(message.author, veri["seviye"], kazanilan_rol)
-            await message.channel.send(embed=embed)
+            hedef_kanal = seviye_mesaj_kanali_al(message.channel)
+            await hedef_kanal.send(embed=embed)
     except Exception as e:
         print(f"Seviye sistemi hatası: {e}")
 
