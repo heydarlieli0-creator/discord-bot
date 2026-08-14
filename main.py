@@ -25,7 +25,7 @@ def keep_alive():
 # API Anahtarları
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 DISCORD_TOKEN = os.environ.get("Discord_Token")
-SEVIYE_KANAL_ID = os.environ.get("SEVIYE_KANAL_ID")  # Seviye atlama mesajlarının gideceği kanal ID'si
+SEVIYE_KANAL_ID = os.environ.get("SEVIYE_KANAL_ID", "1533423499505307698")  # Seviye atlama mesajlarının gideceği kanal
 
 groq_client = Groq(api_key=GROQ_API_KEY)
 
@@ -89,16 +89,30 @@ def toplam_xp_hesapla(veri):
     return 300 * (seviye - 1) * seviye // 2 + veri["xp"]
 
 
-def seviye_mesaj_kanali_al(varsayilan_kanal):
+async def seviye_mesaj_kanali_al(varsayilan_kanal):
     """SEVIYE_KANAL_ID ayarlıysa o kanalı döndürür, yoksa mesajın atıldığı kanalı döndürür."""
     if SEVIYE_KANAL_ID:
         try:
-            kanal = client.get_channel(int(SEVIYE_KANAL_ID))
-            if kanal is not None:
-                return kanal
-            print(f"SEVIYE_KANAL_ID ({SEVIYE_KANAL_ID}) bulunamadı, mesajın atıldığı kanala düşülüyor.")
+            kanal_id = int(SEVIYE_KANAL_ID)
         except ValueError:
             print(f"SEVIYE_KANAL_ID geçerli bir sayı değil: {SEVIYE_KANAL_ID}")
+            return varsayilan_kanal
+
+        kanal = client.get_channel(kanal_id)
+        if kanal is not None:
+            return kanal
+
+        # Cache'te yoksa doğrudan Discord'dan çekmeyi dene
+        try:
+            kanal = await client.fetch_channel(kanal_id)
+            return kanal
+        except discord.NotFound:
+            print(f"SEVIYE_KANAL_ID ({SEVIYE_KANAL_ID}) ile eşleşen bir kanal yok. ID'yi kontrol et.")
+        except discord.Forbidden:
+            print(f"SEVIYE_KANAL_ID ({SEVIYE_KANAL_ID}) kanalını görme izni yok! Bot'a o kanalda 'Kanalı Görüntüle' izni ver.")
+        except Exception as e:
+            print(f"SEVIYE_KANAL_ID kanalı çekilemedi: {e}")
+
     return varsayilan_kanal
 
 
@@ -766,7 +780,7 @@ async def on_message(message):
             if seviye_atladi:
                 kazanilan_rol = await seviye_rolu_ver(message.author, veri["seviye"])
                 embed = seviye_atlama_embed(message.author, veri["seviye"], kazanilan_rol)
-                hedef_kanal = seviye_mesaj_kanali_al(message.channel)
+                hedef_kanal = await seviye_mesaj_kanali_al(message.channel)
                 await hedef_kanal.send(embed=embed)
         except Exception as e:
             print(f"!köledailyxp hatası: {e}")
@@ -793,7 +807,7 @@ async def on_message(message):
         if seviye_atladi:
             kazanilan_rol = await seviye_rolu_ver(message.author, veri["seviye"])
             embed = seviye_atlama_embed(message.author, veri["seviye"], kazanilan_rol)
-            hedef_kanal = seviye_mesaj_kanali_al(message.channel)
+            hedef_kanal = await seviye_mesaj_kanali_al(message.channel)
             await hedef_kanal.send(embed=embed)
     except Exception as e:
         print(f"Seviye sistemi hatası: {e}")
