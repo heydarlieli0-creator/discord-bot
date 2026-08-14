@@ -78,26 +78,70 @@ def kullanici_verisi_al(user_id):
             "mesaj_sayisi": 0,
             "son_daily": 0,
         }
-    # Eskiden oluşturulmuş kayıtlarda son_daily alanı eksikse ekle
     if "son_daily" not in seviye_verileri[uid]:
         seviye_verileri[uid]["son_daily"] = 0
     return seviye_verileri[uid]
 
 
 def toplam_xp_hesapla(veri):
-    """Sıralama için: seviye + mevcut xp'yi tek bir sayıya çevirir."""
     seviye = veri["seviye"]
     return 300 * (seviye - 1) * seviye // 2 + veri["xp"]
 
 
-def seviye_atlama_embed(member, yeni_seviye):
-    """AmariBot tarzı seviye atlama embed'i oluşturur."""
+async def seviye_rolu_ver(member, yeni_seviye):
+    """Her 5 seviyede bir 'Level X' rolü oluşturur/bulur ve kullanıcıya verir.
+    Bir önceki kilometre taşı rolünü kullanıcıdan alır."""
+    if yeni_seviye % 5 != 0:
+        return None
+
+    guild = member.guild
+    rol_adi = f"Level {yeni_seviye}"
+    rol = discord.utils.get(guild.roles, name=rol_adi)
+
+    if rol is None:
+        try:
+            rol = await guild.create_role(name=rol_adi, reason="Seviye ödülü rolü")
+        except discord.Forbidden:
+            print("Rol oluşturma izni yok! Bot'a 'Rolleri Yönet' izni ver.")
+            return None
+        except Exception as e:
+            print(f"Rol oluşturma hatası: {e}")
+            return None
+
+    try:
+        await member.add_roles(rol, reason="Seviye atladı")
+    except discord.Forbidden:
+        print("Rol verme izni yok! Bot rolünü rol hiyerarşisinde yukarı taşı.")
+        return None
+    except Exception as e:
+        print(f"Rol verme hatası: {e}")
+        return None
+
+    # Bir önceki kilometre taşı rolünü kaldır (Level 5 -> Level 10'a geçince Level 5'i al)
+    onceki_seviye = yeni_seviye - 5
+    if onceki_seviye > 0:
+        onceki_rol = discord.utils.get(guild.roles, name=f"Level {onceki_seviye}")
+        if onceki_rol and onceki_rol in member.roles:
+            try:
+                await member.remove_roles(onceki_rol, reason="Yeni seviye rolüyle değiştirildi")
+            except Exception as e:
+                print(f"Eski rol kaldırma hatası: {e}")
+
+    return rol
+
+
+def seviye_atlama_embed(member, yeni_seviye, kazanilan_rol=None):
     sonraki_rol_seviye = ((yeni_seviye // 5) + 1) * 5
+
+    if kazanilan_rol:
+        rol_satiri = f"You just advanced to **level {yeni_seviye}** and earned {kazanilan_rol.mention} role!"
+    else:
+        rol_satiri = f"You just advanced to **level {yeni_seviye}**!"
 
     embed = discord.Embed(
         title=f"{member.display_name} level up!",
         description=(
-            f"You just advanced to **level {yeni_seviye}**!\n"
+            f"{rol_satiri}\n"
             f"You'll earn a role when you reach **level {sonraki_rol_seviye}**."
         ),
         color=0x57F287
@@ -655,7 +699,6 @@ TRIVIA_SORULARI = [
 
 
 
-
 @client.event
 async def on_ready():
     await tree.sync()
@@ -707,7 +750,8 @@ async def on_message(message):
                 f"🎁 {message.author.mention}, günlük ödülünü aldın: **+{kazanilan_xp} XP**!"
             )
             if seviye_atladi:
-                embed = seviye_atlama_embed(message.author, veri["seviye"])
+                kazanilan_rol = await seviye_rolu_ver(message.author, veri["seviye"])
+                embed = seviye_atlama_embed(message.author, veri["seviye"], kazanilan_rol)
                 await message.channel.send(embed=embed)
         except Exception as e:
             print(f"!köledailyxp hatası: {e}")
@@ -732,7 +776,8 @@ async def on_message(message):
         seviye_verisi_kaydet()
 
         if seviye_atladi:
-            embed = seviye_atlama_embed(message.author, veri["seviye"])
+            kazanilan_rol = await seviye_rolu_ver(message.author, veri["seviye"])
+            embed = seviye_atlama_embed(message.author, veri["seviye"], kazanilan_rol)
             await message.channel.send(embed=embed)
     except Exception as e:
         print(f"Seviye sistemi hatası: {e}")
