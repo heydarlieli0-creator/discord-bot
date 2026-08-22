@@ -24,10 +24,15 @@ def keep_alive():
 
 # API Anahtarları
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-DISCORD_TOKEN = os.environ.get("Discord_Token")
-SEVIYE_KANAL_ID = os.environ.get("SEVIYE_KANAL_ID", "1533423499505307698")  # Seviye atlama mesajlarının gideceği kanal
+DISCORD_TOKEN = os.environ.get("Discord_Token") or os.environ.get("DISCORD_TOKEN")
+SEVIYE_KANAL_ID = os.environ.get("SEVIYE_KANAL_ID", "1533423499505307698")
 
-groq_client = Groq(api_key=GROQ_API_KEY)
+if not DISCORD_TOKEN:
+    print("❌ HATA: Discord Token bulunamadı!")
+if not GROQ_API_KEY:
+    print("⚠️ UYARI: GROQ_API_KEY bulunamadı. /ask komutu çalışmaz.")
+
+groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -38,13 +43,12 @@ intents.members = True
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 
-# Sayı tahmin oyunu için hafıza
 aktif_oyunlar = {}
 
 # ================= SEVİYE SİSTEMİ =================
 SEVIYE_DOSYASI = "seviyeler.json"
-BASLANGIC_SEVIYE_XP = 300  # 1. seviyeden 2. seviyeye geçmek için gereken xp
-SEVIYE_XP_ARTISI = 300     # Her seviye atlandığında gereken xp bu kadar artar
+BASLANGIC_SEVIYE_XP = 300
+SEVIYE_XP_ARTISI = 300
 
 
 def seviye_verisi_yukle():
@@ -90,7 +94,6 @@ def toplam_xp_hesapla(veri):
 
 
 async def seviye_mesaj_kanali_al(varsayilan_kanal):
-    """SEVIYE_KANAL_ID ayarlıysa o kanalı döndürür, yoksa mesajın atıldığı kanalı döndürür."""
     if SEVIYE_KANAL_ID:
         try:
             kanal_id = int(SEVIYE_KANAL_ID)
@@ -102,14 +105,13 @@ async def seviye_mesaj_kanali_al(varsayilan_kanal):
         if kanal is not None:
             return kanal
 
-        # Cache'te yoksa doğrudan Discord'dan çekmeyi dene
         try:
             kanal = await client.fetch_channel(kanal_id)
             return kanal
         except discord.NotFound:
-            print(f"SEVIYE_KANAL_ID ({SEVIYE_KANAL_ID}) ile eşleşen bir kanal yok. ID'yi kontrol et.")
+            print(f"SEVIYE_KANAL_ID ({SEVIYE_KANAL_ID}) ile eşleşen bir kanal yok.")
         except discord.Forbidden:
-            print(f"SEVIYE_KANAL_ID ({SEVIYE_KANAL_ID}) kanalını görme izni yok! Bot'a o kanalda 'Kanalı Görüntüle' izni ver.")
+            print(f"SEVIYE_KANAL_ID ({SEVIYE_KANAL_ID}) kanalını görme izni yok!")
         except Exception as e:
             print(f"SEVIYE_KANAL_ID kanalı çekilemedi: {e}")
 
@@ -117,8 +119,6 @@ async def seviye_mesaj_kanali_al(varsayilan_kanal):
 
 
 async def seviye_rolu_ver(member, yeni_seviye):
-    """Her 5 seviyede bir 'Level X' rolü oluşturur/bulur ve kullanıcıya verir.
-    Bir önceki kilometre taşı rolünü kullanıcıdan alır."""
     if yeni_seviye % 5 != 0:
         return None
 
@@ -145,7 +145,6 @@ async def seviye_rolu_ver(member, yeni_seviye):
         print(f"Rol verme hatası: {e}")
         return None
 
-    # Bir önceki kilometre taşı rolünü kaldır (Level 5 -> Level 10'a geçince Level 5'i al)
     onceki_seviye = yeni_seviye - 5
     if onceki_seviye > 0:
         onceki_rol = discord.utils.get(guild.roles, name=f"Level {onceki_seviye}")
@@ -222,7 +221,7 @@ TRIVIA_SORULARI = [
     {"soru": "One Punch Man'de En Güçlü Kahraman kimdir?", "dogru": "Saitama", "secenekler": ["Genos", "Saitama", "Bang", "King"]},
     {"soru": "Naruto'da Hokage'nin en yüksek rütbesi nedir?", "dogru": "Hokage", "secenekler": ["Jonin", "Hokage", "Anbu", "Kage"]},
     {"soru": "Attack on Titan'da Colossal Titan'ı kim kontrol eder?", "dogru": "Bertholdt", "secenekler": ["Reiner", "Bertholdt", "Annie", "Eren"]},
-    {"soru": "Demon Spayer'da Rengoku'nun nefesi nedir?", "dogru": "Alev Nefesi", "secenekler": ["Su Nefesi", "Alev Nefesi", "Rüzgar Nefesi", "Yıldırım Nefesi"]},
+    {"soru": "Demon Slayer'da Rengoku'nun nefesi nedir?", "dogru": "Alev Nefesi", "secenekler": ["Su Nefesi", "Alev Nefesi", "Rüzgar Nefesi", "Yıldırım Nefesi"]},
     {"soru": "Jujutsu Kaisen'de Megumi'nin Shikigami'lerinden biri hangisidir?", "dogru": "Divine Dogs", "secenekler": ["Divine Dogs", "Mahoraga", "Nue", "Toad"]},
     {"soru": "Dragon Ball'da Namekian'ların lideri kimdir?", "dogru": "Guru", "secenekler": ["Piccolo", "Guru", "Nail", "Dende"]},
     {"soru": "Death Note'ta L'nin gerçek adı nedir?", "dogru": "L Lawliet", "secenekler": ["Near", "L Lawliet", "Mello", "Watari"]},
@@ -356,7 +355,7 @@ TRIVIA_SORULARI = [
     {"soru": "Jujutsu Kaisen'de Toge'nin tekniği nedir?", "dogru": "Cursed Speech", "secenekler": ["Domain", "Cursed Speech", "Shikigami", "Idle"]},
     {"soru": "Dragon Ball'da Piccolo'nun babasının adı nedir?", "dogru": "King Piccolo", "secenekler": ["Kami", "King Piccolo", "Nail", "Guru"]},
     {"soru": "Death Note'ta Watari'nin gerçek adı nedir?", "dogru": "Quillsh Wammy", "secenekler": ["L", "Quillsh Wammy", "Near", "Roger"]},
-    {"soru": "My Hero Academia'da Kirishima'ның Quirk'i nedir?", "dogru": "Hardening", "secenekler": ["Explosion", "Hardening", "Acid", "Creation"]},
+    {"soru": "My Hero Academia'da Kirishima'nın Quirk'i nedir?", "dogru": "Hardening", "secenekler": ["Explosion", "Hardening", "Acid", "Creation"]},
     {"soru": "Tokyo Ghoul'da Uta'nın mesleği nedir?", "dogru": "Maske yapımcısı", "secenekler": ["Kahveci", "Maske yapımcısı", "Avcı", "Doktor"]},
     {"soru": "Fullmetal Alchemist'te May Chang'in alchemy stili nedir?", "dogru": "Alkahestry", "secenekler": ["Alchemy", "Alkahestry", "Transmutation", "Homunculus"]},
     {"soru": "Hunter x Hunter'da Illumi'nin kardeşi kimdir?", "dogru": "Killua", "secenekler": ["Alluka", "Killua", "Milluki", "Kalluto"]},
@@ -394,7 +393,7 @@ TRIVIA_SORULARI = [
     {"soru": "Demon Slayer'da Obanai'nin nefesi nedir?", "dogru": "Yılan Nefesi", "secenekler": ["Alev", "Yılan Nefesi", "Su", "Rüzgar"]},
     {"soru": "Jujutsu Kaisen'de Kokichi'nin robotunun adı nedir?", "dogru": "Mechamaru", "secenekler": ["Panda", "Mechamaru", "Ultimate", "Cursed"]},
     {"soru": "Dragon Ball'da Yamcha'nın tekniği nedir?", "dogru": "Wolf Fang Fist", "secenekler": ["Kamehameha", "Wolf Fang Fist", "Special Beam", "Final Flash"]},
-    {"soru": "Death Note'ta Takada'nın mesleği nedir?", "dogru": "Sunucu / Sunucu", "secenekler": ["Polis", "Sunucu / Sunucu", "Doktor", "Öğretmen"]},
+    {"soru": "Death Note'ta Takada'nın mesleği nedir?", "dogru": "Sunucu", "secenekler": ["Polis", "Sunucu", "Doktor", "Öğretmen"]},
     {"soru": "My Hero Academia'da Sero'nun Quirk'i nedir?", "dogru": "Tape", "secenekler": ["Explosion", "Tape", "Hardening", "Acid"]},
     {"soru": "Tokyo Ghoul'da Naki'nin grubunun adı nedir?", "dogru": "White Suits", "secenekler": ["Aogiri", "White Suits", "CCG", "Anteiku"]},
     {"soru": "Fullmetal Alchemist'te Selim Bradley'nin gerçek kimliği nedir?", "dogru": "Pride", "secenekler": ["Wrath", "Pride", "Envy", "Gluttony"]},
@@ -726,29 +725,26 @@ TRIVIA_SORULARI = [
 ]
 
 
-
 @client.event
 async def on_ready():
     await tree.sync()
-    print(f"Logged in as {client.user} (ID: {client.user.id})")
+    print(f"✅ Logged in as {client.user} (ID: {client.user.id})")
     print("Bot hazır!")
 
 
 @client.event
 async def on_message(message):
-    # Botların kendi mesajlarını ve DM'leri sayma
     if message.author.bot or message.guild is None:
         return
 
     icerik = message.content.strip()
 
-    # ---- !köledailyxp günlük xp komutu ----
     if icerik.lower() == "!köledailyxp":
         try:
             veri = kullanici_verisi_al(message.author.id)
             simdi = time.time()
             son_daily = veri.get("son_daily", 0)
-            bekleme_suresi = 24 * 60 * 60  # 24 saat
+            bekleme_suresi = 24 * 60 * 60
             fark = simdi - son_daily
 
             if fark < bekleme_suresi:
@@ -786,7 +782,6 @@ async def on_message(message):
             print(f"!köledailyxp hatası: {e}")
         return
 
-    # "!" ile başlayan diğer mesajlara mesaj xp'si verme
     if icerik.startswith("!"):
         return
 
@@ -813,7 +808,6 @@ async def on_message(message):
         print(f"Seviye sistemi hatası: {e}")
 
 
-# Global hata yakalayıcı
 @tree.error
 async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
     print(f"Komut hatası: {error}")
@@ -826,14 +820,13 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
         pass
 
 
-# --- YAPAY ZEKA SOHBETİ ---
 @tree.command(name="ask", description="Yapay zekaya soru sorarsın.")
 @app_commands.describe(soru="Sorulacak soru")
 async def ask(interaction: discord.Interaction, soru: str):
     await interaction.response.defer()
     try:
-        if not GROQ_API_KEY:
-            await interaction.followup.send("Groq API anahtarı bulunamadı! Render'da `GROQ_API_KEY` env değişkenini kontrol et.")
+        if not groq_client:
+            await interaction.followup.send("Groq API anahtarı bulunamadı!")
             return
 
         chat_completion = groq_client.chat.completions.create(
@@ -855,7 +848,6 @@ async def ask(interaction: discord.Interaction, soru: str):
         await interaction.followup.send(f"Bir hata oluştu: {e}")
 
 
-# --- SEVİYE SİSTEMİ KOMUTU ---
 @tree.command(name="seviye", description="Seviyeni, XP'ni ve mesaj sayını gösterir.")
 @app_commands.describe(kullanici="Seviyesini görmek istediğin kişi (boş bırakırsan kendini gösterir)")
 async def seviye(interaction: discord.Interaction, kullanici: discord.Member = None):
@@ -905,9 +897,6 @@ async def siralama(interaction: discord.Interaction):
         await interaction.followup.send("Bir hata oluştu.")
 
 
-# ================= OYUNLAR =================
-
-# 1. OYUN: Taş Kağıt Makas
 @tree.command(name="tkm", description="Bot ile Taş, Kağıt, Makas oynarsın.")
 @app_commands.choices(secim=[
     app_commands.Choice(name="Taş", value="taş"),
@@ -935,7 +924,6 @@ async def tkm(interaction: discord.Interaction, secim: app_commands.Choice[str])
         await interaction.followup.send("Bir hata oluştu.")
 
 
-# 2. OYUN: Sayı Tahmin (1-100)
 @tree.command(name="tahmin", description="1-100 arası tutulan sayıyı tahmin etme oyunu.")
 @app_commands.describe(sayi="1-100 arası bir sayı girin")
 async def tahmin(interaction: discord.Interaction, sayi: int):
@@ -958,7 +946,6 @@ async def tahmin(interaction: discord.Interaction, sayi: int):
         await interaction.followup.send("Bir hata oluştu.")
 
 
-# 3. OYUN: Slot Makinesi
 @tree.command(name="slot", description="Slot makinesini çevirip şansınızı denersiniz.")
 async def slot(interaction: discord.Interaction):
     await interaction.response.defer()
@@ -982,7 +969,6 @@ async def slot(interaction: discord.Interaction):
         await interaction.followup.send("Bir hata oluştu.")
 
 
-# 4. OYUN: Butonlu Bilgi Yarışması
 class BilgiYarismasiView(discord.ui.View):
     def __init__(self, dogru_cevap, secenekler):
         super().__init__(timeout=30)
@@ -1058,7 +1044,6 @@ async def bilgi_yarismasi(interaction: discord.Interaction):
         await interaction.followup.send("Bir hata oluştu.")
 
 
-# 5. OYUN: Kasa Açma
 @tree.command(name="kasa-ac", description="Gizli bir kasa açarak içinden ne çıkacağını görürsün.")
 async def kasa_ac(interaction: discord.Interaction):
     await interaction.response.defer()
@@ -1078,7 +1063,6 @@ async def kasa_ac(interaction: discord.Interaction):
         await interaction.followup.send("Bir hata oluştu.")
 
 
-# 6. OYUN: Zar Düellosu
 @tree.command(name="zardüellosu", description="Bot ile zar düellosu yaparsınız (Büyük atan kazanır).")
 async def zardüellosu(interaction: discord.Interaction):
     await interaction.response.defer()
@@ -1100,7 +1084,6 @@ async def zardüellosu(interaction: discord.Interaction):
         await interaction.followup.send("Bir hata oluştu.")
 
 
-# 7. OYUN: Yazı Tura
 @tree.command(name="yazitura", description="Klasik yazı tura atma oyunu.")
 @app_commands.choices(secim=[
     app_commands.Choice(name="Yazı", value="yazı"),
@@ -1123,11 +1106,10 @@ async def yazitura(interaction: discord.Interaction, secim: app_commands.Choice[
         await interaction.followup.send("Bir hata oluştu.")
 
 
-# Botu Çalıştır
 keep_alive()
 
 if __name__ == "__main__":
     if not DISCORD_TOKEN:
-        print("HATA: Discord Token bulunamadı! Render'da `Discord_Token` env değişkenini ayarlayın.")
+        print("HATA: Discord Token bulunamadı!")
     else:
         client.run(DISCORD_TOKEN)
