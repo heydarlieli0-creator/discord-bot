@@ -41,10 +41,6 @@ tree = app_commands.CommandTree(client)
 # Sayı tahmin oyunu için hafıza
 aktif_oyunlar = {}
 
-# Sesli kanal süre takibi
-ses_katilimlari = {}  # {user_id: baslangic_zamani}
-SES_XP_PER_DAKIKA = 2
-
 # ================= SEVİYE SİSTEMİ =================
 SEVIYE_DOSYASI = "seviyeler.json"
 BASLANGIC_SEVIYE_XP = 300  # 1. seviyeden 2. seviyeye geçmek için gereken xp
@@ -82,12 +78,9 @@ def kullanici_verisi_al(user_id):
             "sonraki_seviye_xp": BASLANGIC_SEVIYE_XP,
             "mesaj_sayisi": 0,
             "son_daily": 0,
-            "ses_suresi": 0,
         }
     if "son_daily" not in seviye_verileri[uid]:
         seviye_verileri[uid]["son_daily"] = 0
-    if "ses_suresi" not in seviye_verileri[uid]:
-        seviye_verileri[uid]["ses_suresi"] = 0
     return seviye_verileri[uid]
 
 
@@ -184,39 +177,6 @@ def seviye_atlama_embed(member, yeni_seviye, kazanilan_rol=None):
     embed.set_thumbnail(url=member.display_avatar.url)
     embed.set_footer(text="Seviye Sistemi", icon_url=member.display_avatar.url)
     return embed
-
-
-async def ses_xp_ekle(member, gecen_saniye):
-    """Sesli kanalda geçirilen süreye göre XP ekler ve sesli süreyi kaydeder."""
-    try:
-        veri = kullanici_verisi_al(member.id)
-        veri["ses_suresi"] += gecen_saniye
-
-        dakika = int(gecen_saniye // 60)
-        if dakika <= 0:
-            seviye_verisi_kaydet()
-            return
-
-        kazanilan_xp = dakika * SES_XP_PER_DAKIKA
-        veri["xp"] += kazanilan_xp
-
-        seviye_atladi = False
-        while veri["xp"] >= veri["sonraki_seviye_xp"]:
-            veri["xp"] -= veri["sonraki_seviye_xp"]
-            veri["seviye"] += 1
-            veri["sonraki_seviye_xp"] += SEVIYE_XP_ARTISI
-            seviye_atladi = True
-
-        seviye_verisi_kaydet()
-
-        if seviye_atladi:
-            kazanilan_rol = await seviye_rolu_ver(member, veri["seviye"])
-            embed = seviye_atlama_embed(member, veri["seviye"], kazanilan_rol)
-            hedef_kanal = await seviye_mesaj_kanali_al(member.guild.system_channel)
-            if hedef_kanal:
-                await hedef_kanal.send(embed=embed)
-    except Exception as e:
-        print(f"Ses XP hatası: {e}")
 
 
 TRIVIA_SORULARI = [
@@ -396,7 +356,7 @@ TRIVIA_SORULARI = [
     {"soru": "Jujutsu Kaisen'de Toge'nin tekniği nedir?", "dogru": "Cursed Speech", "secenekler": ["Domain", "Cursed Speech", "Shikigami", "Idle"]},
     {"soru": "Dragon Ball'da Piccolo'nun babasının adı nedir?", "dogru": "King Piccolo", "secenekler": ["Kami", "King Piccolo", "Nail", "Guru"]},
     {"soru": "Death Note'ta Watari'nin gerçek adı nedir?", "dogru": "Quillsh Wammy", "secenekler": ["L", "Quillsh Wammy", "Near", "Roger"]},
-    {"soru": "My Hero Academia'da Kirishima'ных Quirk'i nedir?", "dogru": "Hardening", "secenekler": ["Explosion", "Hardening", "Acid", "Creation"]},
+    {"soru": "My Hero Academia'da Kirishima'ның Quirk'i nedir?", "dogru": "Hardening", "secenekler": ["Explosion", "Hardening", "Acid", "Creation"]},
     {"soru": "Tokyo Ghoul'da Uta'nın mesleği nedir?", "dogru": "Maske yapımcısı", "secenekler": ["Kahveci", "Maske yapımcısı", "Avcı", "Doktor"]},
     {"soru": "Fullmetal Alchemist'te May Chang'in alchemy stili nedir?", "dogru": "Alkahestry", "secenekler": ["Alchemy", "Alkahestry", "Transmutation", "Homunculus"]},
     {"soru": "Hunter x Hunter'da Illumi'nin kardeşi kimdir?", "dogru": "Killua", "secenekler": ["Alluka", "Killua", "Milluki", "Kalluto"]},
@@ -766,34 +726,12 @@ TRIVIA_SORULARI = [
 ]
 
 
+
 @client.event
 async def on_ready():
     await tree.sync()
     print(f"Logged in as {client.user} (ID: {client.user.id})")
     print("Bot hazır!")
-
-
-@client.event
-async def on_voice_state_update(member, before, after):
-    if member.bot:
-        return
-
-    # Kanala katıldı
-    if before.channel is None and after.channel is not None:
-        ses_katilimlari[member.id] = time.time()
-
-    # Kanaldan tamamen ayrıldı
-    elif before.channel is not None and after.channel is None:
-        baslangic = ses_katilimlari.pop(member.id, None)
-        if baslangic:
-            await ses_xp_ekle(member, time.time() - baslangic)
-
-    # Kanal değiştirdi (sürede kesinti olmasın diye zamanlayıcıyı sıfırla)
-    elif before.channel is not None and after.channel is not None and before.channel != after.channel:
-        baslangic = ses_katilimlari.get(member.id)
-        if baslangic:
-            await ses_xp_ekle(member, time.time() - baslangic)
-        ses_katilimlari[member.id] = time.time()
 
 
 @client.event
@@ -925,20 +863,11 @@ async def seviye(interaction: discord.Interaction, kullanici: discord.Member = N
     try:
         hedef = kullanici or interaction.user
         veri = kullanici_verisi_al(hedef.id)
-
-        ses_saniye = veri.get("ses_suresi", 0)
-        # Kullanıcı şu an sesteyse anlık süreyi de ekle
-        if hedef.id in ses_katilimlari:
-            ses_saniye += time.time() - ses_katilimlari[hedef.id]
-        ses_saat = int(ses_saniye // 3600)
-        ses_dakika = int((ses_saniye % 3600) // 60)
-
         metin = (
             f"📊 **{hedef.display_name}** için istatistikler\n\n"
             f"🏆 Seviye: **{veri['seviye']}**\n"
             f"✨ XP: **{veri['xp']} / {veri['sonraki_seviye_xp']}**\n"
-            f"💬 Mesaj sayısı: **{veri['mesaj_sayisi']}**\n"
-            f"🎙️ Sesli süre: **{ses_saat} saat {ses_dakika} dakika**"
+            f"💬 Mesaj sayısı: **{veri['mesaj_sayisi']}**"
         )
         await interaction.followup.send(metin)
     except Exception as e:
@@ -973,44 +902,6 @@ async def siralama(interaction: discord.Interaction):
         await interaction.followup.send(metin)
     except Exception as e:
         print(f"/sıralama hatası: {e}")
-        await interaction.followup.send("Bir hata oluştu.")
-
-
-@tree.command(name="sesralama", description="Sesli kanalda en çok vakit geçirenlerin sıralamasını gösterir (ilk 10 kişi).")
-async def sesralama(interaction: discord.Interaction):
-    await interaction.response.defer()
-    try:
-        if not seviye_verileri:
-            await interaction.followup.send("Henüz kimse sesli kanalda vakit geçirmemiş.")
-            return
-
-        simdi = time.time()
-        sureler = {}
-        for uid, veri in seviye_verileri.items():
-            toplam = veri.get("ses_suresi", 0)
-            uid_int = int(uid)
-            if uid_int in ses_katilimlari:  # şu an kanaldaysa anlık süreyi de ekle
-                toplam += simdi - ses_katilimlari[uid_int]
-            sureler[uid] = toplam
-
-        siralanmis = sorted(sureler.items(), key=lambda x: x[1], reverse=True)[:10]
-        madalyalar = ["🥇", "🥈", "🥉"]
-        satirlar = []
-        for i, (uid, saniye) in enumerate(siralanmis):
-            if saniye <= 0:
-                continue
-            saat = int(saniye // 3600)
-            dakika = int((saniye % 3600) // 60)
-            simge = madalyalar[i] if i < 3 else f"**{i + 1}.**"
-            satirlar.append(f"{simge} <@{uid}> — **{saat} saat {dakika} dakika**")
-
-        if not satirlar:
-            await interaction.followup.send("Henüz kimse sesli kanalda vakit geçirmemiş.")
-            return
-
-        await interaction.followup.send("🎙️ **SESLİ KANAL SIRALAMASI** 🎙️\n\n" + "\n".join(satirlar))
-    except Exception as e:
-        print(f"/sesralama hatası: {e}")
         await interaction.followup.send("Bir hata oluştu.")
 
 
