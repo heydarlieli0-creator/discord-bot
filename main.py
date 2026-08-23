@@ -177,7 +177,6 @@ def seviye_atlama_embed(member, yeni_seviye, kazanilan_rol=None):
     embed.set_footer(text="Seviye Sistemi", icon_url=member.display_avatar.url)
     return embed
 
-
 TRIVIA_SORULARI = [
     # ==================== ANİME (280 soru) ====================
     {"soru": "Naruto'nun en iyi arkadaşı kimdir?", "dogru": "Sasuke Uchiha", "secenekler": ["Sakura Haruno", "Sasuke Uchiha", "Kakashi Hatake", "Shikamaru Nara"]},
@@ -221,7 +220,7 @@ TRIVIA_SORULARI = [
     {"soru": "One Punch Man'de En Güçlü Kahraman kimdir?", "dogru": "Saitama", "secenekler": ["Genos", "Saitama", "Bang", "King"]},
     {"soru": "Naruto'da Hokage'nin en yüksek rütbesi nedir?", "dogru": "Hokage", "secenekler": ["Jonin", "Hokage", "Anbu", "Kage"]},
     {"soru": "Attack on Titan'da Colossal Titan'ı kim kontrol eder?", "dogru": "Bertholdt", "secenekler": ["Reiner", "Bertholdt", "Annie", "Eren"]},
-    {"soru": "Demon Slayer'da Rengoku'nun nefesi nedir?", "dogru": "Alev Nefesi", "secenekler": ["Su Nefesi", "Alev Nefesi", "Rüzgar Nefesi", "Yıldırım Nefesi"]},
+    {"soru": "Demon Spayer'da Rengoku'nun nefesi nedir?", "dogru": "Alev Nefesi", "secenekler": ["Su Nefesi", "Alev Nefesi", "Rüzgar Nefesi", "Yıldırım Nefesi"]},
     {"soru": "Jujutsu Kaisen'de Megumi'nin Shikigami'lerinden biri hangisidir?", "dogru": "Divine Dogs", "secenekler": ["Divine Dogs", "Mahoraga", "Nue", "Toad"]},
     {"soru": "Dragon Ball'da Namekian'ların lideri kimdir?", "dogru": "Guru", "secenekler": ["Piccolo", "Guru", "Nail", "Dende"]},
     {"soru": "Death Note'ta L'nin gerçek adı nedir?", "dogru": "L Lawliet", "secenekler": ["Near", "L Lawliet", "Mello", "Watari"]},
@@ -355,7 +354,7 @@ TRIVIA_SORULARI = [
     {"soru": "Jujutsu Kaisen'de Toge'nin tekniği nedir?", "dogru": "Cursed Speech", "secenekler": ["Domain", "Cursed Speech", "Shikigami", "Idle"]},
     {"soru": "Dragon Ball'da Piccolo'nun babasının adı nedir?", "dogru": "King Piccolo", "secenekler": ["Kami", "King Piccolo", "Nail", "Guru"]},
     {"soru": "Death Note'ta Watari'nin gerçek adı nedir?", "dogru": "Quillsh Wammy", "secenekler": ["L", "Quillsh Wammy", "Near", "Roger"]},
-    {"soru": "My Hero Academia'da Kirishima'nın Quirk'i nedir?", "dogru": "Hardening", "secenekler": ["Explosion", "Hardening", "Acid", "Creation"]},
+    {"soru": "My Hero Academia'da Kirishima'ның Quirk'i nedir?", "dogru": "Hardening", "secenekler": ["Explosion", "Hardening", "Acid", "Creation"]},
     {"soru": "Tokyo Ghoul'da Uta'nın mesleği nedir?", "dogru": "Maske yapımcısı", "secenekler": ["Kahveci", "Maske yapımcısı", "Avcı", "Doktor"]},
     {"soru": "Fullmetal Alchemist'te May Chang'in alchemy stili nedir?", "dogru": "Alkahestry", "secenekler": ["Alchemy", "Alkahestry", "Transmutation", "Homunculus"]},
     {"soru": "Hunter x Hunter'da Illumi'nin kardeşi kimdir?", "dogru": "Killua", "secenekler": ["Alluka", "Killua", "Milluki", "Kalluto"]},
@@ -393,7 +392,7 @@ TRIVIA_SORULARI = [
     {"soru": "Demon Slayer'da Obanai'nin nefesi nedir?", "dogru": "Yılan Nefesi", "secenekler": ["Alev", "Yılan Nefesi", "Su", "Rüzgar"]},
     {"soru": "Jujutsu Kaisen'de Kokichi'nin robotunun adı nedir?", "dogru": "Mechamaru", "secenekler": ["Panda", "Mechamaru", "Ultimate", "Cursed"]},
     {"soru": "Dragon Ball'da Yamcha'nın tekniği nedir?", "dogru": "Wolf Fang Fist", "secenekler": ["Kamehameha", "Wolf Fang Fist", "Special Beam", "Final Flash"]},
-    {"soru": "Death Note'ta Takada'nın mesleği nedir?", "dogru": "Sunucu", "secenekler": ["Polis", "Sunucu", "Doktor", "Öğretmen"]},
+    {"soru": "Death Note'ta Takada'nın mesleği nedir?", "dogru": "Sunucu / Sunucu", "secenekler": ["Polis", "Sunucu / Sunucu", "Doktor", "Öğretmen"]},
     {"soru": "My Hero Academia'da Sero'nun Quirk'i nedir?", "dogru": "Tape", "secenekler": ["Explosion", "Tape", "Hardening", "Acid"]},
     {"soru": "Tokyo Ghoul'da Naki'nin grubunun adı nedir?", "dogru": "White Suits", "secenekler": ["Aogiri", "White Suits", "CCG", "Anteiku"]},
     {"soru": "Fullmetal Alchemist'te Selim Bradley'nin gerçek kimliği nedir?", "dogru": "Pride", "secenekler": ["Wrath", "Pride", "Envy", "Gluttony"]},
@@ -727,9 +726,13 @@ TRIVIA_SORULARI = [
 
 @client.event
 async def on_ready():
-    await tree.sync()
     print(f"✅ Logged in as {client.user} (ID: {client.user.id})")
     print("Bot hazır!")
+    try:
+        synced = await tree.sync()
+        print(f"Komutlar sync edildi: {len(synced)} adet")
+    except Exception as e:
+        print(f"Sync hatası (önemsiz olabilir): {e}")
 
 
 @client.event
@@ -873,7 +876,7 @@ async def siralama(interaction: discord.Interaction):
     try:
         if not seviye_verileri:
             await interaction.followup.send("Henüz kimse XP kazanmamış.")
-            return
+            return 
 
         siralanmis = sorted(
             seviye_verileri.items(),
@@ -1112,4 +1115,6 @@ if __name__ == "__main__":
     if not DISCORD_TOKEN:
         print("HATA: Discord Token bulunamadı!")
     else:
+        print("Bot başlatılıyor, 8 saniye bekleniyor (rate limit önlemi)...")
+        time.sleep(8)  # 429 hatasını azaltmak için
         client.run(DISCORD_TOKEN)
