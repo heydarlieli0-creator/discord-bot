@@ -1,3 +1,5 @@
+import psycopg2
+from psycopg2.extras import RealDictCursor
 import os
 import random
 import threading
@@ -51,42 +53,107 @@ BASLANGIC_SEVIYE_XP = 300
 SEVIYE_XP_ARTISI = 300
 
 
-def seviye_verisi_yukle():
-    if os.path.exists(SEVIYE_DOSYASI):
-        try:
-            with open(SEVIYE_DOSYASI, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            print(f"Seviye verisi okunamadı: {e}")
-            return {}
-    return {}
+# ================= SEVİYE SİSTEMİ (PostgreSQL) =================
+DATABASE_URL = os.environ.get("DATABASE_URL")
 
+def get_db_connection():
+    return psycopg2.connect(DATABASE_URL, sslmode='require')
 
-def seviye_verisi_kaydet():
+def init_db():
+    """Tablo yoksa oluşturur"""
     try:
-        with open(SEVIYE_DOSYASI, "w", encoding="utf-8") as f:
-            json.dump(seviye_verileri, f, ensure_ascii=False, indent=2)
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS seviyeler (
+                user_id TEXT PRIMARY KEY,
+                xp INTEGER DEFAULT 0,
+                seviye INTEGER DEFAULT 1,
+                sonraki_seviye_xp INTEGER DEFAULT 300,
+                mesaj_sayisi INTEGER DEFAULT 0,
+                son_daily DOUBLE PRECISION DEFAULT 0
+            )
+        """)
+        conn.commit()
+        cur.close()
+        conn.close()
+        print("✅ Database tablosu hazır")
     except Exception as e:
-        print(f"Seviye verisi kaydedilemedi: {e}")
-
-
-seviye_verileri = seviye_verisi_yukle()
-
+        print(f"Database init hatası: {e}")
 
 def kullanici_verisi_al(user_id):
     uid = str(user_id)
-    if uid not in seviye_verileri:
-        seviye_verileri[uid] = {
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT * FROM seviyeler WHERE user_id = %s", (uid,))
+        row = cur.fetchone()
+        
+        if row is None:
+            # Yeni kullanıcı oluştur
+            cur.execute("""
+                INSERT INTO seviyeler (user_id, xp, seviye, sonraki_seviye_xp, mesaj_sayisi, son_daily)
+                VALUES (%s, 0, 1, 300, 0, 0)
+            """, (uid,))
+            conn.commit()
+            veri = {
+                "xp": 0,
+                "seviye": 1,
+                "sonraki_seviye_xp": 300,
+                "mesaj_sayisi": 0,
+                "son_daily": 0
+            }
+        else:
+            veri = dict(row)
+        
+        cur.close()
+        conn.close()
+        return veri
+    except Exception as e:
+        print(f"kullanici_verisi_al hatası: {e}")
+        return {
             "xp": 0,
             "seviye": 1,
-            "sonraki_seviye_xp": BASLANGIC_SEVIYE_XP,
+            "sonraki_seviye_xp": 300,
             "mesaj_sayisi": 0,
-            "son_daily": 0,
+            "son_daily": 0
         }
-    if "son_daily" not in seviye_verileri[uid]:
-        seviye_verileri[uid]["son_daily"] = 0
-    return seviye_verileri[uid]
 
+def seviye_verisi_kaydet(user_id, veri):
+    """Tek kullanıcıyı kaydeder"""
+    uid = str(user_id)
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO seviyeler (user_id, xp, seviye, sonraki_seviye_xp, mesaj_sayisi, son_daily)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (user_id) DO UPDATE SET
+                xp = EXCLUDED.xp,
+                seviye = EXCLUDED.seviye,
+                sonraki_seviye_xp = EXCLUDED.sonraki_seviye_xp,
+                mesaj_sayisi = EXCLUDED.mesaj_sayisi,
+                son_daily = EXCLUDED.son_daily
+        """, (uid, veri["xp"], veri["seviye"], veri["sonraki_seviye_xp"], veri["mesaj_sayisi"], veri["son_daily"]))
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print(f"seviye_verisi_kaydet hatası: {e}")
+
+def tum_seviye_verilerini_al():
+    """Sıralama için tüm kullanıcıları getirir"""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT * FROM seviyeler")
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return {row["user_id"]: dict(row) for row in rows}
+    except Exception as e:
+        print(f"tum_seviye_verilerini_al hatası: {e}")
+        return {}
 
 def toplam_xp_hesapla(veri):
     seviye = veri["seviye"]
@@ -727,6 +794,7 @@ TRIVIA_SORULARI = [
 @client.event
 async def on_ready():
     print(f"✅ Logged in as {client.user} (ID: {client.user.id})")
+    init_db()
     print("Bot hazır!")
     try:
         synced = await tree.sync()
@@ -771,7 +839,7 @@ async def on_message(message):
                 veri["sonraki_seviye_xp"] += SEVIYE_XP_ARTISI
                 seviye_atladi = True
 
-            seviye_verisi_kaydet()
+            seviye_verisi_kaydet(message.author.id, veri)
 
             await message.channel.send(
                 f"🎁 {message.author.mention}, günlük ödülünü aldın: **+{kazanilan_xp} XP**!"
@@ -800,7 +868,7 @@ async def on_message(message):
             veri["sonraki_seviye_xp"] += SEVIYE_XP_ARTISI
             seviye_atladi = True
 
-        seviye_verisi_kaydet()
+        seviye_verisi_kaydet(message.author.id, veri)
 
         if seviye_atladi:
             kazanilan_rol = await seviye_rolu_ver(message.author, veri["seviye"])
@@ -874,6 +942,7 @@ async def seviye(interaction: discord.Interaction, kullanici: discord.Member = N
 async def siralama(interaction: discord.Interaction):
     await interaction.response.defer()
     try:
+        seviye_verileri = tum_seviye_verilerini_al()
         if not seviye_verileri:
             await interaction.followup.send("Henüz kimse XP kazanmamış.")
             return 
