@@ -42,6 +42,9 @@ groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
 intents = discord.Intents.default()
 intents.message_content = True
+intents.messages = True
+intents.guild_messages = True
+intents.dm_messages = True
 intents.voice_states = True
 intents.guilds = True
 intents.members = True
@@ -50,6 +53,9 @@ client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 
 aktif_oyunlar = {}
+
+LEVEL_DEBUG = os.environ.get('LEVEL_DEBUG', 'false').strip().lower() in {'1','true','yes','on'}
+level_runtime_stats = {'events': 0, 'saved': 0, 'errors': 0, 'last_user': None, 'last_guild': None}
 
 # ================= SEVİYE SİSTEMİ =================
 SEVIYE_DOSYASI = "seviyeler.json"
@@ -1039,6 +1045,15 @@ async def on_ready():
     print(f"✅ Logged in as {client.user} (ID: {client.user.id})")
     try:
         await asyncio.to_thread(init_db)
+        def _db_startup_health():
+            with db_cursor(dict_cursor=True) as (_, cur):
+                cur.execute("SELECT COUNT(*) AS n FROM seviyeler")
+                return int(cur.fetchone()['n'])
+        level_rows = await asyncio.to_thread(_db_startup_health)
+        print(
+            f"✅ Seviye listener aktif • guild_messages={intents.guild_messages} "
+            f"• message_content={intents.message_content} • dbRows={level_rows}"
+        )
     except Exception as e:
         print(f"❌ Database başlatılamadı: {type(e).__name__}: {e}")
         print("⚠️ Seviye sistemi DB düzelene kadar kayıt yapamaz; diğer bot özellikleri çalışmaya devam eder.")
@@ -1055,9 +1070,18 @@ async def on_message(message):
     if message.author.bot or message.guild is None:
         return
 
+    level_runtime_stats['events'] += 1
+    level_runtime_stats['last_user'] = str(message.author.id)
+    level_runtime_stats['last_guild'] = str(message.guild.id)
+
     icerik = message.content.strip()
     guild_id = message.guild.id
     user_id = message.author.id
+    if LEVEL_DEBUG:
+        print(
+            f"💬 XP event alındı • guild={guild_id} • user={user_id} "
+            f"• contentLen={len(message.content or '')}"
+        )
 
     if icerik.lower() == "!köledailyxp":
         try:
@@ -1097,6 +1121,12 @@ async def on_message(message):
         veri, onceki_seviye = await asyncio.to_thread(
             seviye_xp_ekle, guild_id, user_id, 5, 1
         )
+        level_runtime_stats['saved'] += 1
+        if LEVEL_DEBUG:
+            print(
+                f"✅ XP kaydedildi • guild={guild_id} • user={user_id} "
+                f"• xp={veri['xp']} • level={veri['seviye']} • messages={veri['mesaj_sayisi']}"
+            )
 
         if int(veri["seviye"]) > onceki_seviye:
             kazanilan_rol = await seviye_rolu_ver(message.author, int(veri["seviye"]))
@@ -1104,7 +1134,42 @@ async def on_message(message):
             hedef_kanal = await seviye_mesaj_kanali_al(message.channel)
             await hedef_kanal.send(embed=embed)
     except Exception as e:
+        level_runtime_stats['errors'] += 1
         print(f"❌ Seviye sistemi DB hatası: {type(e).__name__}: {e}")
+
+
+@tree.command(name="dbdurum", description="Seviye veritabanı ve mesaj dinleyicisinin durumunu gösterir.")
+async def dbdurum(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    try:
+        if interaction.guild_id is None:
+            await interaction.followup.send("Bu komut yalnızca sunucuda kullanılabilir.", ephemeral=True)
+            return
+
+        def _health():
+            if not _db_initialized:
+                init_db()
+            with db_cursor(dict_cursor=True) as (_, cur):
+                cur.execute("SELECT COUNT(*) AS n FROM seviyeler WHERE guild_id=%s", (str(interaction.guild_id),))
+                return int(cur.fetchone()['n'])
+
+        row_count = await asyncio.to_thread(_health)
+        await interaction.followup.send(
+            "🧪 **Seviye sistemi durumu**\n"
+            f"• PostgreSQL: **bağlı**\n"
+            f"• Bu sunucudaki kayıt: **{row_count}**\n"
+            f"• Mesaj event'i: **{level_runtime_stats['events']}**\n"
+            f"• Başarılı XP kaydı: **{level_runtime_stats['saved']}**\n"
+            f"• XP kayıt hatası: **{level_runtime_stats['errors']}**\n"
+            f"• Mesaj intent: **{intents.guild_messages}**\n"
+            f"• Message Content: **{intents.message_content}**",
+            ephemeral=True,
+        )
+    except Exception as e:
+        await interaction.followup.send(
+            f"❌ PostgreSQL testi başarısız: `{type(e).__name__}: {e}`",
+            ephemeral=True,
+        )
 
 
 @tree.error
