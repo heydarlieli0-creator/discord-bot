@@ -1,5 +1,9 @@
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from psycopg2.pool import ThreadedConnectionPool
+from contextlib import contextmanager
+import asyncio
+import atexit
 import os
 import random
 import threading
@@ -55,105 +59,344 @@ SEVIYE_XP_ARTISI = 300
 
 # ================= SEVİYE SİSTEMİ (PostgreSQL) =================
 DATABASE_URL = os.environ.get("DATABASE_URL")
+DB_SSLMODE = os.environ.get("DB_SSLMODE", "require")
+DB_MIN_CONN = max(1, int(os.environ.get("DB_MIN_CONN", "1")))
+DB_MAX_CONN = max(DB_MIN_CONN, int(os.environ.get("DB_MAX_CONN", "8")))
+
+_db_pool = None
+_db_pool_lock = threading.Lock()
+_db_init_lock = threading.Lock()
+_db_conn_semaphore = threading.BoundedSemaphore(DB_MAX_CONN)
+_db_initialized = False
+
+
+def _database_url_kontrol():
+    if not DATABASE_URL:
+        raise RuntimeError(
+            "DATABASE_URL tanımlı değil. PostgreSQL bağlantı adresini environment değişkenine ekle."
+        )
+
+
+def get_db_pool():
+    """Thread-safe PostgreSQL connection pool'u lazy olarak oluşturur."""
+    global _db_pool
+    _database_url_kontrol()
+
+    if _db_pool is None:
+        with _db_pool_lock:
+            if _db_pool is None:
+                _db_pool = ThreadedConnectionPool(
+                    DB_MIN_CONN,
+                    DB_MAX_CONN,
+                    dsn=DATABASE_URL,
+                    sslmode=DB_SSLMODE,
+                    connect_timeout=10,
+                    application_name="discord-seviye-botu",
+                )
+    return _db_pool
+
 
 def get_db_connection():
-    return psycopg2.connect(DATABASE_URL, sslmode='require')
+    """Pool doluysa kısa süre bekler; anlık yoğunlukta XP kaybını önler."""
+    if not _db_conn_semaphore.acquire(timeout=10):
+        raise TimeoutError("PostgreSQL connection pool 10 saniye içinde boşalmadı")
+    try:
+        return get_db_pool().getconn()
+    except Exception:
+        _db_conn_semaphore.release()
+        raise
+
+
+def release_db_connection(conn, close=False):
+    try:
+        if conn is not None and _db_pool is not None:
+            _db_pool.putconn(conn, close=close or bool(conn.closed))
+    finally:
+        _db_conn_semaphore.release()
+
+
+@contextmanager
+def db_cursor(dict_cursor=False):
+    """Bağlantıyı pool'dan alır; commit/rollback ve iade işlemini garanti eder."""
+    conn = None
+    cur = None
+    broken = False
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor if dict_cursor else None)
+        yield conn, cur
+        conn.commit()
+    except Exception as e:
+        broken = isinstance(e, (psycopg2.OperationalError, psycopg2.InterfaceError))
+        if conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                broken = True
+        raise
+    finally:
+        if cur is not None:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        if conn is not None:
+            release_db_connection(conn, close=broken)
+
+
+def close_db_pool():
+    global _db_pool
+    with _db_pool_lock:
+        if _db_pool is not None:
+            try:
+                _db_pool.closeall()
+            finally:
+                _db_pool = None
+
+
+atexit.register(close_db_pool)
+
 
 def init_db():
-    """Tablo yoksa oluşturur"""
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS seviyeler (
-                user_id TEXT PRIMARY KEY,
-                xp INTEGER DEFAULT 0,
-                seviye INTEGER DEFAULT 1,
-                sonraki_seviye_xp INTEGER DEFAULT 300,
-                mesaj_sayisi INTEGER DEFAULT 0,
-                son_daily DOUBLE PRECISION DEFAULT 0
-            )
-        """)
-        conn.commit()
-        cur.close()
-        conn.close()
-        print("✅ Database tablosu hazır")
-    except Exception as e:
-        print(f"Database init hatası: {e}")
+    """Seviye tablosunu oluşturur ve eski user_id-only şemayı güvenle migrate eder."""
+    global _db_initialized
+    if _db_initialized:
+        return True
 
-def kullanici_verisi_al(user_id):
-    uid = str(user_id)
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT * FROM seviyeler WHERE user_id = %s", (uid,))
-        row = cur.fetchone()
-        
-        if row is None:
-            # Yeni kullanıcı oluştur
+    with _db_init_lock:
+        if _db_initialized:
+            return True
+
+        with db_cursor() as (_, cur):
+            cur.execute("SELECT 1")
             cur.execute("""
-                INSERT INTO seviyeler (user_id, xp, seviye, sonraki_seviye_xp, mesaj_sayisi, son_daily)
-                VALUES (%s, 0, 1, 300, 0, 0)
-            """, (uid,))
-            conn.commit()
-            veri = {
-                "xp": 0,
-                "seviye": 1,
-                "sonraki_seviye_xp": 300,
-                "mesaj_sayisi": 0,
-                "son_daily": 0
-            }
-        else:
-            veri = dict(row)
-        
-        cur.close()
-        conn.close()
-        return veri
-    except Exception as e:
-        print(f"kullanici_verisi_al hatası: {e}")
-        return {
-            "xp": 0,
-            "seviye": 1,
-            "sonraki_seviye_xp": 300,
-            "mesaj_sayisi": 0,
-            "son_daily": 0
-        }
+                CREATE TABLE IF NOT EXISTS seviyeler (
+                    guild_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    xp INTEGER NOT NULL DEFAULT 0,
+                    seviye INTEGER NOT NULL DEFAULT 1,
+                    sonraki_seviye_xp INTEGER NOT NULL DEFAULT 300,
+                    mesaj_sayisi INTEGER NOT NULL DEFAULT 0,
+                    son_daily DOUBLE PRECISION NOT NULL DEFAULT 0,
+                    PRIMARY KEY (guild_id, user_id)
+                )
+            """)
 
-def seviye_verisi_kaydet(user_id, veri):
-    """Tek kullanıcıyı kaydeder"""
+            # Eski sürümde guild_id yoktu ve PRIMARY KEY yalnız user_id idi.
+            cur.execute("ALTER TABLE seviyeler ADD COLUMN IF NOT EXISTS guild_id TEXT")
+            cur.execute("UPDATE seviyeler SET guild_id='0' WHERE guild_id IS NULL OR guild_id='' ")
+            cur.execute("ALTER TABLE seviyeler ALTER COLUMN guild_id SET NOT NULL")
+
+            # Eski PK yapısını yalnız gerekiyorsa composite PK'ye dönüştür.
+            cur.execute("""
+                SELECT c.conname, pg_get_constraintdef(c.oid) AS definition
+                FROM pg_constraint c
+                JOIN pg_class t ON t.oid = c.conrelid
+                JOIN pg_namespace n ON n.oid = t.relnamespace
+                WHERE t.relname = 'seviyeler'
+                  AND n.nspname = current_schema()
+                  AND c.contype = 'p'
+                LIMIT 1
+            """)
+            pk = cur.fetchone()
+            definition = pk[1] if pk else None
+            if definition != 'PRIMARY KEY (guild_id, user_id)':
+                if pk:
+                    # Constraint adı PostgreSQL tarafından üretildiği için identifier olarak quote edilir.
+                    safe_pk_name = str(pk[0]).replace('"', '""')
+                    cur.execute(f'ALTER TABLE seviyeler DROP CONSTRAINT "{safe_pk_name}"')
+                cur.execute("ALTER TABLE seviyeler ADD PRIMARY KEY (guild_id, user_id)")
+
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_seviyeler_guild_rank "
+                "ON seviyeler (guild_id, seviye DESC, xp DESC)"
+            )
+
+        _db_initialized = True
+        print(f"✅ Database tablosu hazır • pool={DB_MIN_CONN}-{DB_MAX_CONN} • guild-scoped=true")
+        return True
+
+def _kullanici_satiri_kilitle(cur, guild_id, user_id):
+    """Kullanıcı satırını transaction içinde FOR UPDATE ile kilitler."""
+    gid = str(guild_id)
+    uid = str(user_id)
+
+    cur.execute(
+        "SELECT * FROM seviyeler WHERE guild_id=%s AND user_id=%s FOR UPDATE",
+        (gid, uid),
+    )
+    row = cur.fetchone()
+    if row is not None:
+        return dict(row)
+
+    # Eski sürümden kalan global kaydı ilk gerçek sunucuda kaybetmeden devral.
+    cur.execute(
+        "SELECT * FROM seviyeler WHERE guild_id='0' AND user_id=%s FOR UPDATE",
+        (uid,),
+    )
+    legacy = cur.fetchone()
+    if legacy is not None:
+        cur.execute(
+            "UPDATE seviyeler SET guild_id=%s WHERE guild_id='0' AND user_id=%s RETURNING *",
+            (gid, uid),
+        )
+        return dict(cur.fetchone())
+
+    cur.execute("""
+        INSERT INTO seviyeler (
+            guild_id, user_id, xp, seviye, sonraki_seviye_xp, mesaj_sayisi, son_daily
+        ) VALUES (%s, %s, 0, 1, %s, 0, 0)
+        ON CONFLICT (guild_id, user_id) DO NOTHING
+    """, (gid, uid, BASLANGIC_SEVIYE_XP))
+    cur.execute(
+        "SELECT * FROM seviyeler WHERE guild_id=%s AND user_id=%s FOR UPDATE",
+        (gid, uid),
+    )
+    row = cur.fetchone()
+    if row is None:
+        raise RuntimeError("Seviye kullanıcı satırı oluşturulamadı")
+    return dict(row)
+
+
+def kullanici_verisi_al(guild_id, user_id):
+    """Kullanıcı verisini getirir. DB hatasında sahte 0 XP döndürmez."""
+    try:
+        if not _db_initialized:
+            init_db()
+        with db_cursor(dict_cursor=True) as (_, cur):
+            return _kullanici_satiri_kilitle(cur, guild_id, user_id)
+    except Exception as e:
+        print(f"❌ kullanici_verisi_al hatası: {type(e).__name__}: {e}")
+        raise
+
+
+def seviye_verisi_kaydet(guild_id, user_id, veri):
+    """Uyumluluk amaçlı güvenli UPSERT. Başarısız kayıt sessizce yutulmaz."""
+    if not _db_initialized:
+        init_db()
+    gid = str(guild_id)
     uid = str(user_id)
     try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO seviyeler (user_id, xp, seviye, sonraki_seviye_xp, mesaj_sayisi, son_daily)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            ON CONFLICT (user_id) DO UPDATE SET
-                xp = EXCLUDED.xp,
-                seviye = EXCLUDED.seviye,
-                sonraki_seviye_xp = EXCLUDED.sonraki_seviye_xp,
-                mesaj_sayisi = EXCLUDED.mesaj_sayisi,
-                son_daily = EXCLUDED.son_daily
-        """, (uid, veri["xp"], veri["seviye"], veri["sonraki_seviye_xp"], veri["mesaj_sayisi"], veri["son_daily"]))
-        conn.commit()
-        cur.close()
-        conn.close()
+        with db_cursor() as (_, cur):
+            cur.execute("""
+                INSERT INTO seviyeler (
+                    guild_id, user_id, xp, seviye, sonraki_seviye_xp, mesaj_sayisi, son_daily
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (guild_id, user_id) DO UPDATE SET
+                    xp = EXCLUDED.xp,
+                    seviye = EXCLUDED.seviye,
+                    sonraki_seviye_xp = EXCLUDED.sonraki_seviye_xp,
+                    mesaj_sayisi = EXCLUDED.mesaj_sayisi,
+                    son_daily = EXCLUDED.son_daily
+            """, (
+                gid,
+                uid,
+                int(veri["xp"]),
+                int(veri["seviye"]),
+                int(veri["sonraki_seviye_xp"]),
+                int(veri["mesaj_sayisi"]),
+                float(veri.get("son_daily", 0)),
+            ))
+        return True
     except Exception as e:
-        print(f"seviye_verisi_kaydet hatası: {e}")
+        print(f"❌ seviye_verisi_kaydet hatası: {type(e).__name__}: {e}")
+        raise
 
-def tum_seviye_verilerini_al():
-    """Sıralama için tüm kullanıcıları getirir"""
+
+def seviye_xp_ekle(guild_id, user_id, xp_miktari, mesaj_artisi=0, son_daily=None):
+    """XP artışını tek transaction içinde atomik olarak uygular."""
+    if not _db_initialized:
+        init_db()
+    with db_cursor(dict_cursor=True) as (_, cur):
+        veri = _kullanici_satiri_kilitle(cur, guild_id, user_id)
+        onceki_seviye = int(veri["seviye"])
+
+        veri["xp"] = int(veri["xp"]) + int(xp_miktari)
+        veri["mesaj_sayisi"] = int(veri["mesaj_sayisi"]) + int(mesaj_artisi)
+        if son_daily is not None:
+            veri["son_daily"] = float(son_daily)
+
+        while veri["xp"] >= veri["sonraki_seviye_xp"]:
+            veri["xp"] -= veri["sonraki_seviye_xp"]
+            veri["seviye"] += 1
+            veri["sonraki_seviye_xp"] += SEVIYE_XP_ARTISI
+
+        cur.execute("""
+            UPDATE seviyeler
+            SET xp=%s, seviye=%s, sonraki_seviye_xp=%s, mesaj_sayisi=%s, son_daily=%s
+            WHERE guild_id=%s AND user_id=%s
+            RETURNING *
+        """, (
+            int(veri["xp"]),
+            int(veri["seviye"]),
+            int(veri["sonraki_seviye_xp"]),
+            int(veri["mesaj_sayisi"]),
+            float(veri.get("son_daily", 0)),
+            str(guild_id),
+            str(user_id),
+        ))
+        guncel = dict(cur.fetchone())
+        return guncel, onceki_seviye
+
+
+def gunluk_xp_al(guild_id, user_id):
+    """Daily cooldown kontrolünü ve XP kaydını aynı transaction içinde yapar."""
+    if not _db_initialized:
+        init_db()
+    simdi = time.time()
+    bekleme_suresi = 24 * 60 * 60
+
+    with db_cursor(dict_cursor=True) as (_, cur):
+        veri = _kullanici_satiri_kilitle(cur, guild_id, user_id)
+        son_daily = float(veri.get("son_daily", 0) or 0)
+        fark = simdi - son_daily
+
+        if fark < bekleme_suresi:
+            return False, veri, int(bekleme_suresi - fark), 0, int(veri["seviye"])
+
+        kazanilan_xp = random.randint(350, 750)
+        onceki_seviye = int(veri["seviye"])
+        veri["xp"] = int(veri["xp"]) + kazanilan_xp
+        veri["son_daily"] = simdi
+
+        while veri["xp"] >= veri["sonraki_seviye_xp"]:
+            veri["xp"] -= veri["sonraki_seviye_xp"]
+            veri["seviye"] += 1
+            veri["sonraki_seviye_xp"] += SEVIYE_XP_ARTISI
+
+        cur.execute("""
+            UPDATE seviyeler
+            SET xp=%s, seviye=%s, sonraki_seviye_xp=%s, mesaj_sayisi=%s, son_daily=%s
+            WHERE guild_id=%s AND user_id=%s
+            RETURNING *
+        """, (
+            int(veri["xp"]),
+            int(veri["seviye"]),
+            int(veri["sonraki_seviye_xp"]),
+            int(veri["mesaj_sayisi"]),
+            float(veri["son_daily"]),
+            str(guild_id),
+            str(user_id),
+        ))
+        guncel = dict(cur.fetchone())
+        return True, guncel, 0, kazanilan_xp, onceki_seviye
+
+
+def tum_seviye_verilerini_al(guild_id):
+    """Yalnız ilgili Discord sunucusunun sıralamasını getirir."""
     try:
-        conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT * FROM seviyeler")
-        rows = cur.fetchall()
-        cur.close()
-        conn.close()
-        return {row["user_id"]: dict(row) for row in rows}
+        if not _db_initialized:
+            init_db()
+        with db_cursor(dict_cursor=True) as (_, cur):
+            cur.execute(
+                "SELECT * FROM seviyeler WHERE guild_id=%s ORDER BY seviye DESC, xp DESC",
+                (str(guild_id),),
+            )
+            rows = cur.fetchall()
+            return {row["user_id"]: dict(row) for row in rows}
     except Exception as e:
-        print(f"tum_seviye_verilerini_al hatası: {e}")
-        return {}
+        print(f"❌ tum_seviye_verilerini_al hatası: {type(e).__name__}: {e}")
+        raise
 
 def toplam_xp_hesapla(veri):
     seviye = veri["seviye"]
@@ -794,7 +1037,11 @@ TRIVIA_SORULARI = [
 @client.event
 async def on_ready():
     print(f"✅ Logged in as {client.user} (ID: {client.user.id})")
-    init_db()
+    try:
+        await asyncio.to_thread(init_db)
+    except Exception as e:
+        print(f"❌ Database başlatılamadı: {type(e).__name__}: {e}")
+        print("⚠️ Seviye sistemi DB düzelene kadar kayıt yapamaz; diğer bot özellikleri çalışmaya devam eder.")
     print("Bot hazır!")
     try:
         synced = await tree.sync()
@@ -809,17 +1056,16 @@ async def on_message(message):
         return
 
     icerik = message.content.strip()
+    guild_id = message.guild.id
+    user_id = message.author.id
 
     if icerik.lower() == "!köledailyxp":
         try:
-            veri = kullanici_verisi_al(message.author.id)
-            simdi = time.time()
-            son_daily = veri.get("son_daily", 0)
-            bekleme_suresi = 24 * 60 * 60
-            fark = simdi - son_daily
+            uygun, veri, kalan, kazanilan_xp, onceki_seviye = await asyncio.to_thread(
+                gunluk_xp_al, guild_id, user_id
+            )
 
-            if fark < bekleme_suresi:
-                kalan = int(bekleme_suresi - fark)
+            if not uygun:
                 saat = kalan // 3600
                 dakika = (kalan % 3600) // 60
                 await message.channel.send(
@@ -828,55 +1074,37 @@ async def on_message(message):
                 )
                 return
 
-            kazanilan_xp = random.randint(350, 750)
-            veri["xp"] += kazanilan_xp
-            veri["son_daily"] = simdi
-
-            seviye_atladi = False
-            while veri["xp"] >= veri["sonraki_seviye_xp"]:
-                veri["xp"] -= veri["sonraki_seviye_xp"]
-                veri["seviye"] += 1
-                veri["sonraki_seviye_xp"] += SEVIYE_XP_ARTISI
-                seviye_atladi = True
-
-            seviye_verisi_kaydet(message.author.id, veri)
-
             await message.channel.send(
                 f"🎁 {message.author.mention}, günlük ödülünü aldın: **+{kazanilan_xp} XP**!"
             )
-            if seviye_atladi:
-                kazanilan_rol = await seviye_rolu_ver(message.author, veri["seviye"])
-                embed = seviye_atlama_embed(message.author, veri["seviye"], kazanilan_rol)
+
+            if int(veri["seviye"]) > onceki_seviye:
+                kazanilan_rol = await seviye_rolu_ver(message.author, int(veri["seviye"]))
+                embed = seviye_atlama_embed(message.author, int(veri["seviye"]), kazanilan_rol)
                 hedef_kanal = await seviye_mesaj_kanali_al(message.channel)
                 await hedef_kanal.send(embed=embed)
         except Exception as e:
-            print(f"!köledailyxp hatası: {e}")
+            print(f"❌ !köledailyxp DB/seviye hatası: {type(e).__name__}: {e}")
+            await message.channel.send(
+                "⚠️ Seviye veritabanına şu anda ulaşılamıyor. XP kaybı olmaması için ödül uygulanmadı."
+            )
         return
 
     if icerik.startswith("!"):
         return
 
     try:
-        veri = kullanici_verisi_al(message.author.id)
-        veri["xp"] += 5
-        veri["mesaj_sayisi"] += 1
+        veri, onceki_seviye = await asyncio.to_thread(
+            seviye_xp_ekle, guild_id, user_id, 5, 1
+        )
 
-        seviye_atladi = False
-        while veri["xp"] >= veri["sonraki_seviye_xp"]:
-            veri["xp"] -= veri["sonraki_seviye_xp"]
-            veri["seviye"] += 1
-            veri["sonraki_seviye_xp"] += SEVIYE_XP_ARTISI
-            seviye_atladi = True
-
-        seviye_verisi_kaydet(message.author.id, veri)
-
-        if seviye_atladi:
-            kazanilan_rol = await seviye_rolu_ver(message.author, veri["seviye"])
-            embed = seviye_atlama_embed(message.author, veri["seviye"], kazanilan_rol)
+        if int(veri["seviye"]) > onceki_seviye:
+            kazanilan_rol = await seviye_rolu_ver(message.author, int(veri["seviye"]))
+            embed = seviye_atlama_embed(message.author, int(veri["seviye"]), kazanilan_rol)
             hedef_kanal = await seviye_mesaj_kanali_al(message.channel)
             await hedef_kanal.send(embed=embed)
     except Exception as e:
-        print(f"Seviye sistemi hatası: {e}")
+        print(f"❌ Seviye sistemi DB hatası: {type(e).__name__}: {e}")
 
 
 @tree.error
@@ -924,8 +1152,11 @@ async def ask(interaction: discord.Interaction, soru: str):
 async def seviye(interaction: discord.Interaction, kullanici: discord.Member = None):
     await interaction.response.defer()
     try:
+        if interaction.guild_id is None:
+            await interaction.followup.send("Bu komut yalnızca bir sunucuda kullanılabilir.")
+            return
         hedef = kullanici or interaction.user
-        veri = kullanici_verisi_al(hedef.id)
+        veri = await asyncio.to_thread(kullanici_verisi_al, interaction.guild_id, hedef.id)
         metin = (
             f"📊 **{hedef.display_name}** için istatistikler\n\n"
             f"🏆 Seviye: **{veri['seviye']}**\n"
@@ -942,7 +1173,10 @@ async def seviye(interaction: discord.Interaction, kullanici: discord.Member = N
 async def siralama(interaction: discord.Interaction):
     await interaction.response.defer()
     try:
-        seviye_verileri = tum_seviye_verilerini_al()
+        if interaction.guild_id is None:
+            await interaction.followup.send("Bu komut yalnızca bir sunucuda kullanılabilir.")
+            return
+        seviye_verileri = await asyncio.to_thread(tum_seviye_verilerini_al, interaction.guild_id)
         if not seviye_verileri:
             await interaction.followup.send("Henüz kimse XP kazanmamış.")
             return 
