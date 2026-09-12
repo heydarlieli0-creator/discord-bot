@@ -226,6 +226,12 @@ def init_db():
                 ADD COLUMN IF NOT EXISTS son_work DOUBLE PRECISION NOT NULL DEFAULT 0
             """)
 
+            # Envanter kolonu
+            cur.execute("""
+                ALTER TABLE seviyeler 
+                ADD COLUMN IF NOT EXISTS envanter JSONB NOT NULL DEFAULT '{}'::jsonb
+            """)
+
         _db_initialized = True
         print(f"✅ Database tablosu hazır • pool={DB_MIN_CONN}-{DB_MAX_CONN} • guild-scoped=true")
         return True
@@ -515,6 +521,100 @@ def work_yap(guild_id, user_id, job_id):
         return True, job, kazanilan, int(cur.fetchone()["para"])
 
 
+# ================= MARKET + ENVANTER =================
+
+MARKET_ITEMS = {
+    "xp_boost": {
+        "name": "XP Boost (1 Saat)",
+        "price": 2500,
+        "emoji": "⚡",
+        "description": "1 saat boyunca %50 daha fazla XP kazanırsın.",
+        "type": "boost"
+    },
+    "para_boost": {
+        "name": "Para Boost (1 Saat)",
+        "price": 3000,
+        "emoji": "💰",
+        "description": "1 saat boyunca work'ten %50 daha fazla para kazanırsın.",
+        "type": "boost"
+    },
+    "sansli_kutu": {
+        "name": "Şanslı Kutu",
+        "price": 1500,
+        "emoji": "🎁",
+        "description": "Açınca rastgele para veya item çıkar.",
+        "type": "consumable"
+    },
+    "koruma": {
+        "name": "Soygun Koruması",
+        "price": 2000,
+        "emoji": "🛡️",
+        "description": "1 soyguna karşı koruma sağlar.",
+        "type": "consumable"
+    },
+    "vip_rol": {
+        "name": "VIP Rolü (30 Gün)",
+        "price": 15000,
+        "emoji": "👑",
+        "description": "30 gün boyunca özel VIP rolü alırsın.",
+        "type": "role"
+    }
+}
+
+
+def envanter_al(guild_id, user_id):
+    if not _db_initialized:
+        init_db()
+    with db_cursor(dict_cursor=True) as (_, cur):
+        veri = _kullanici_satiri_kilitle(cur, guild_id, user_id)
+        envanter = veri.get("envanter") or {}
+        if isinstance(envanter, str):
+            envanter = json.loads(envanter)
+        return envanter
+
+
+def item_ekle(guild_id, user_id, item_id, miktar=1):
+    if not _db_initialized:
+        init_db()
+    with db_cursor(dict_cursor=True) as (_, cur):
+        veri = _kullanici_satiri_kilitle(cur, guild_id, user_id)
+        envanter = veri.get("envanter") or {}
+        if isinstance(envanter, str):
+            envanter = json.loads(envanter)
+
+        envanter[item_id] = envanter.get(item_id, 0) + miktar
+
+        cur.execute(
+            "UPDATE seviyeler SET envanter=%s WHERE guild_id=%s AND user_id=%s",
+            (json.dumps(envanter), str(guild_id), str(user_id))
+        )
+        return envanter
+
+
+def item_sil(guild_id, user_id, item_id, miktar=1):
+    if not _db_initialized:
+        init_db()
+    with db_cursor(dict_cursor=True) as (_, cur):
+        veri = _kullanici_satiri_kilitle(cur, guild_id, user_id)
+        envanter = veri.get("envanter") or {}
+        if isinstance(envanter, str):
+            envanter = json.loads(envanter)
+
+        mevcut = envanter.get(item_id, 0)
+        if mevcut < miktar:
+            return False, envanter
+
+        envanter[item_id] = mevcut - miktar
+        if envanter[item_id] <= 0:
+            del envanter[item_id]
+
+        cur.execute(
+            "UPDATE seviyeler SET envanter=%s WHERE guild_id=%s AND user_id=%s",
+            (json.dumps(envanter), str(guild_id), str(user_id))
+        )
+        return True, envanter
+
+
 async def seviye_mesaj_kanali_al(varsayilan_kanal):
     if SEVIYE_KANAL_ID:
         try:
@@ -601,10 +701,8 @@ def seviye_atlama_embed(member, yeni_seviye, kazanilan_rol=None):
 
 TRIVIA_SORULARI = [
     # ==================== ANİME (280 soru) ====================
-    # ... (senin tüm trivia listen aynı şekilde buraya gelecek - ben dokunmuyorum)
+    # Buraya senin orijinal TRIVIA_SORULARI listeni koy
 ]
-
-# Not: Trivia listesini senin orijinal kodundaki gibi bırak. Buraya uzun listeyi tekrar yapıştırmıyorum, sen kendi listenle değiştir.
 
 
 @client.event
@@ -1270,6 +1368,127 @@ async def zenginler(interaction: discord.Interaction):
         await interaction.followup.send("Bir hata oluştu.")
 
 
+# ================= MARKET KOMUTLARI =================
+
+class MarketView(discord.ui.View):
+    def __init__(self, user_id: int):
+        super().__init__(timeout=60)
+        self.user_id = user_id
+
+        options = []
+        for item_id, item in MARKET_ITEMS.items():
+            options.append(
+                discord.SelectOption(
+                    label=f"{item['name']} — {item['price']} 💵",
+                    value=item_id,
+                    emoji=item["emoji"],
+                    description=item["description"][:50]
+                )
+            )
+
+        self.select = discord.ui.Select(placeholder="Satın almak istediğin ürünü seç...", options=options)
+        self.select.callback = self.urun_secildi
+        self.add_item(self.select)
+
+    async def urun_secildi(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("Bu menü sana ait değil!", ephemeral=True)
+            return
+
+        item_id = self.select.values[0]
+        item = MARKET_ITEMS[item_id]
+
+        await interaction.response.defer()
+
+        try:
+            veri = await asyncio.to_thread(ekonomi_verisi_al, interaction.guild_id, interaction.user.id)
+            para = int(veri.get("para", 0))
+
+            if para < item["price"]:
+                await interaction.followup.send(f"❌ Yeterli paran yok! Gerekli: **{item['price']} 💵**", ephemeral=True)
+                return
+
+            await asyncio.to_thread(para_ekle, interaction.guild_id, interaction.user.id, -item["price"])
+            await asyncio.to_thread(item_ekle, interaction.guild_id, interaction.user.id, item_id)
+
+            embed = discord.Embed(
+                title="✅ Satın Alma Başarılı",
+                description=f"{item['emoji']} **{item['name']}** envanterine eklendi!\nÖdenen: **{item['price']} 💵**",
+                color=0x57F287
+            )
+            await interaction.followup.send(embed=embed)
+
+        except Exception as e:
+            print(f"/market hatası: {e}")
+            await interaction.followup.send("Bir hata oluştu.", ephemeral=True)
+
+
+@tree.command(name="market", description="Marketten ürün satın alırsın.")
+async def market(interaction: discord.Interaction):
+    await interaction.response.defer()
+    try:
+        if interaction.guild_id is None:
+            await interaction.followup.send("Bu komut sadece sunucuda kullanılabilir.")
+            return
+
+        embed = discord.Embed(
+            title="🛒 Market",
+            description="Aşağıdan satın almak istediğin ürünü seç:",
+            color=0x5865F2
+        )
+
+        for item_id, item in MARKET_ITEMS.items():
+            embed.add_field(
+                name=f"{item['emoji']} {item['name']}",
+                value=f"**{item['price']} 💵**\n{item['description']}",
+                inline=False
+            )
+
+        view = MarketView(interaction.user.id)
+        await interaction.followup.send(embed=embed, view=view)
+
+    except Exception as e:
+        print(f"/market hatası: {e}")
+        await interaction.followup.send("Bir hata oluştu.")
+
+
+@tree.command(name="envanter", description="Envanterini gösterir.")
+async def envanter(interaction: discord.Interaction):
+    await interaction.response.defer()
+    try:
+        if interaction.guild_id is None:
+            await interaction.followup.send("Bu komut sadece sunucuda kullanılabilir.")
+            return
+
+        envanter_data = await asyncio.to_thread(envanter_al, interaction.guild_id, interaction.user.id)
+
+        if not envanter_data:
+            await interaction.followup.send("Envanterin boş.")
+            return
+
+        embed = discord.Embed(
+            title=f"🎒 {interaction.user.display_name} Envanteri",
+            color=0xFEE75C
+        )
+
+        for item_id, miktar in envanter_data.items():
+            item = MARKET_ITEMS.get(item_id)
+            if item:
+                embed.add_field(
+                    name=f"{item['emoji']} {item['name']}",
+                    value=f"Adet: **{miktar}**",
+                    inline=True
+                )
+            else:
+                embed.add_field(name=item_id, value=f"Adet: **{miktar}**", inline=True)
+
+        await interaction.followup.send(embed=embed)
+
+    except Exception as e:
+        print(f"/envanter hatası: {e}")
+        await interaction.followup.send("Bir hata oluştu.")
+
+
 @tree.command(name="help", description="Botun tüm komutlarını ve ne işe yaradıklarını gösterir.")
 async def help_komutu(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
@@ -1298,7 +1517,9 @@ async def help_komutu(interaction: discord.Interaction):
                 "**/daily** — Günlük para ödülünü alırsın.\n"
                 "**/work** — Meslek seçip çalışarak para kazanırsın.\n"
                 "**/pay** — Başkasına para gönderirsin.\n"
-                "**/zenginler** — En zengin 10 kişiyi gösterir."
+                "**/zenginler** — En zengin 10 kişiyi gösterir.\n"
+                "**/market** — Marketten ürün satın alırsın.\n"
+                "**/envanter** — Envanterini gösterir."
             ),
             inline=False
         )
@@ -1337,5 +1558,5 @@ if __name__ == "__main__":
         print("HATA: Discord Token bulunamadı!")
     else:
         print("Bot başlatılıyor, 8 saniye bekleniyor (rate limit önlemi)...")
-        time.sleep(8)  # 429 hatasını azaltmak için
+        time.sleep(8)
         client.run(DISCORD_TOKEN)
