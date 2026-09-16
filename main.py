@@ -22,7 +22,7 @@ app = Flask('')
 
 @app.route('/')
 def home():
-   return "Bot aktif ve çal???yor!"
+   return "Bot aktif ve çalışıyor!"
 
 def run_web():
    app.run(host='0.0.0.0', port=8080)
@@ -31,15 +31,15 @@ def keep_alive():
    t = threading.Thread(target=run_web)
    t.start()
 
-# API Anahtarlar?
+# API Anahtarları
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 DISCORD_TOKEN = os.environ.get("Discord_Token") or os.environ.get("DISCORD_TOKEN")
 SEVIYE_KANAL_ID = os.environ.get("SEVIYE_KANAL_ID", "1533423499505307698")
 
 if not DISCORD_TOKEN:
-   print("? HATA: Discord Token bulunamad?!")
+   print("❌ HATA: Discord Token bulunamadı!")
 if not GROQ_API_KEY:
-   print("? UYARI: GROQ_API_KEY bulunamad?. /ask komutu çal??maz.")
+   print("⚠️ UYARI: GROQ_API_KEY bulunamadı. /ask komutu çalışmaz.")
 
 groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
@@ -60,13 +60,13 @@ aktif_oyunlar = {}
 LEVEL_DEBUG = os.environ.get('LEVEL_DEBUG', 'false').strip().lower() in {'1','true','yes','on'}
 level_runtime_stats = {'events': 0, 'saved': 0, 'errors': 0, 'last_user': None, 'last_guild': None}
 
-# ================= SEV?YE S?STEM? =================
+# ================= SEVİYE SİSTEMİ =================
 SEVIYE_DOSYASI = "seviyeler.json"
 BASLANGIC_SEVIYE_XP = 300
 SEVIYE_XP_ARTISI = 300
 
 
-# ================= SEV?YE S?STEM? (PostgreSQL) =================
+# ================= SEVİYE SİSTEMİ (PostgreSQL) =================
 DATABASE_URL = os.environ.get("DATABASE_URL")
 DB_SSLMODE = os.environ.get("DB_SSLMODE", "require")
 DB_MIN_CONN = max(1, int(os.environ.get("DB_MIN_CONN", "1")))
@@ -82,12 +82,12 @@ _db_initialized = False
 def _database_url_kontrol():
    if not DATABASE_URL:
        raise RuntimeError(
-           "DATABASE_URL tan?ml? de?il. PostgreSQL ba?lant? adresini environment de?i?kenine ekle."
+           "DATABASE_URL tanımlı değil. PostgreSQL bağlantı adresini environment değişkenine ekle."
        )
 
 
 def get_db_pool():
-   """Thread-safe PostgreSQL connection pool'u lazy olarak olu?turur."""
+   """Thread-safe PostgreSQL connection pool'u lazy olarak oluşturur."""
    global _db_pool
    _database_url_kontrol()
 
@@ -106,9 +106,9 @@ def get_db_pool():
 
 
 def get_db_connection():
-   """Pool doluysa k?sa süre bekler; anl?k yo?unlukta XP kayb?n? önler."""
+   """Pool doluysa kısa süre bekler; anlık yoğunlukta XP kaybını önler."""
    if not _db_conn_semaphore.acquire(timeout=10):
-       raise TimeoutError("PostgreSQL connection pool 10 saniye içinde bo?almad?")
+       raise TimeoutError("PostgreSQL connection pool 10 saniye içinde boşalmadı")
    try:
        return get_db_pool().getconn()
    except Exception:
@@ -126,7 +126,7 @@ def release_db_connection(conn, close=False):
 
 @contextmanager
 def db_cursor(dict_cursor=False):
-   """Ba?lant?y? pool'dan al?r; commit/rollback ve iade i?lemini garanti eder."""
+   """Bağlantıyı pool'dan alır; commit/rollback ve iade işlemini garanti eder."""
    conn = None
    cur = None
    broken = False
@@ -167,7 +167,7 @@ atexit.register(close_db_pool)
 
 
 def init_db():
-   """Seviye tablosunu olu?turur ve eski user_id-only ?emay? güvenle migrate eder."""
+   """Seviye tablosunu oluşturur ve eski user_id-only şemayı güvenle migrate eder."""
    global _db_initialized
    if _db_initialized:
        return True
@@ -193,12 +193,12 @@ def init_db():
                )
            """)
 
-           # Eski sürümde guild_id yoktu ve PRIMARY KEY yaln?z user_id idi.
+           # Eski sürümde guild_id yoktu ve PRIMARY KEY yalnız user_id idi.
            cur.execute("ALTER TABLE seviyeler ADD COLUMN IF NOT EXISTS guild_id TEXT")
            cur.execute("UPDATE seviyeler SET guild_id='0' WHERE guild_id IS NULL OR guild_id='' ")
            cur.execute("ALTER TABLE seviyeler ALTER COLUMN guild_id SET NOT NULL")
 
-           # Eski PK yap?s?n? yaln?z gerekiyorsa composite PK'ye dönü?tür.
+           # Eski PK yapısını yalnız gerekiyorsa composite PK'ye dönüştür.
            cur.execute("""
                SELECT c.conname, pg_get_constraintdef(c.oid) AS definition
                FROM pg_constraint c
@@ -213,7 +213,7 @@ def init_db():
            definition = pk[1] if pk else None
            if definition != 'PRIMARY KEY (guild_id, user_id)':
                if pk:
-                   # Constraint ad? PostgreSQL taraf?ndan üretildi?i için identifier olarak quote edilir.
+                   # Constraint adı PostgreSQL tarafından üretildiği için identifier olarak quote edilir.
                    safe_pk_name = str(pk[0]).replace('"', '""')
                    cur.execute(f'ALTER TABLE seviyeler DROP CONSTRAINT "{safe_pk_name}"')
                cur.execute("ALTER TABLE seviyeler ADD PRIMARY KEY (guild_id, user_id)")
@@ -223,7 +223,7 @@ def init_db():
                "ON seviyeler (guild_id, seviye DESC, xp DESC)"
            )
 
-           # Ekonomi kolonlar?
+           # Ekonomi kolonları
            cur.execute("""
                ALTER TABLE seviyeler 
                ADD COLUMN IF NOT EXISTS para BIGINT NOT NULL DEFAULT 0,
@@ -256,11 +256,11 @@ def init_db():
            """)
 
        _db_initialized = True
-       print(f"? Database tablosu haz?r - pool={DB_MIN_CONN}-{DB_MAX_CONN} - guild-scoped=true")
+       print(f"✅ Database tablosu hazır - pool={DB_MIN_CONN}-{DB_MAX_CONN} - guild-scoped=true")
        return True
 
 def _kullanici_satiri_kilitle(cur, guild_id, user_id):
-   """Kullan?c? sat?r?n? transaction içinde FOR UPDATE ile kilitler."""
+   """Kullanıcı satırını transaction içinde FOR UPDATE ile kilitler."""
    gid = str(guild_id)
    uid = str(user_id)
 
@@ -272,7 +272,7 @@ def _kullanici_satiri_kilitle(cur, guild_id, user_id):
    if row is not None:
        return dict(row)
 
-   # Eski sürümden kalan global kayd? ilk gerçek sunucuda kaybetmeden devral.
+   # Eski sürümden kalan global kaydı ilk gerçek sunucuda kaybetmeden devral.
    cur.execute(
        "SELECT * FROM seviyeler WHERE guild_id='0' AND user_id=%s FOR UPDATE",
        (uid,),
@@ -297,24 +297,24 @@ def _kullanici_satiri_kilitle(cur, guild_id, user_id):
    )
    row = cur.fetchone()
    if row is None:
-       raise RuntimeError("Seviye kullan?c? sat?r? olu?turulamad?")
+       raise RuntimeError("Seviye kullanıcı satırı oluşturulamadı")
    return dict(row)
 
 
 def kullanici_verisi_al(guild_id, user_id):
-   """Kullan?c? verisini getirir. DB hatas?nda sahte 0 XP döndürmez."""
+   """Kullanıcı verisini getirir. DB hatasında sahte 0 XP döndürmez."""
    try:
        if not _db_initialized:
            init_db()
        with db_cursor(dict_cursor=True) as (_, cur):
            return _kullanici_satiri_kilitle(cur, guild_id, user_id)
    except Exception as e:
-       print(f"? kullanici_verisi_al hatas?: {type(e).__name__}: {e}")
+       print(f"❌ kullanici_verisi_al hatası: {type(e).__name__}: {e}")
        raise
 
 
 def seviye_verisi_kaydet(guild_id, user_id, veri):
-   """Uyumluluk amaçl? güvenli UPSERT. Ba?ar?s?z kay?t sessizce yutulmaz."""
+   """Uyumluluk amaçlı güvenli UPSERT. Başarısız kayıt sessizce yutulmaz."""
    if not _db_initialized:
        init_db()
    gid = str(guild_id)
@@ -342,12 +342,12 @@ def seviye_verisi_kaydet(guild_id, user_id, veri):
            ))
        return True
    except Exception as e:
-       print(f"? seviye_verisi_kaydet hatas?: {type(e).__name__}: {e}")
+       print(f"❌ seviye_verisi_kaydet hatası: {type(e).__name__}: {e}")
        raise
 
 
 def seviye_xp_ekle(guild_id, user_id, xp_miktari, mesaj_artisi=0, son_daily=None):
-   """XP art???n? tek transaction içinde atomik olarak uygular."""
+   """XP artışını tek transaction içinde atomik olarak uygular."""
    if not _db_initialized:
        init_db()
    with db_cursor(dict_cursor=True) as (_, cur):
@@ -383,7 +383,7 @@ def seviye_xp_ekle(guild_id, user_id, xp_miktari, mesaj_artisi=0, son_daily=None
 
 
 def gunluk_xp_al(guild_id, user_id):
-   """Daily cooldown kontrolünü ve XP kayd?n? ayn? transaction içinde yapar."""
+   """Daily cooldown kontrolünü ve XP kaydını aynı transaction içinde yapar."""
    if not _db_initialized:
        init_db()
    simdi = time.time()
@@ -426,7 +426,7 @@ def gunluk_xp_al(guild_id, user_id):
 
 
 def tum_seviye_verilerini_al(guild_id):
-   """Yaln?z ilgili Discord sunucusunun s?ralamas?n? getirir."""
+   """Yalnız ilgili Discord sunucusunun sıralamasını getirir."""
    try:
        if not _db_initialized:
            init_db()
@@ -438,7 +438,7 @@ def tum_seviye_verilerini_al(guild_id):
            rows = cur.fetchall()
            return {row["user_id"]: dict(row) for row in rows}
    except Exception as e:
-       print(f"? tum_seviye_verilerini_al hatas?: {type(e).__name__}: {e}")
+       print(f"❌ tum_seviye_verilerini_al hatası: {type(e).__name__}: {e}")
        raise
 
 def toplam_xp_hesapla(veri):
@@ -668,17 +668,17 @@ def futbol_karti_olustur(member, veri, ses_suresi, tema_resmi=None):
    return output
 
 
-# ================= EKONOM? S?STEM? =================
+# ================= EKONOMİ SİSTEMİ =================
 
 WORK_JOBS = [
-   {"id": "kurye", "name": "Kurye", "min": 180, "max": 420, "emoji": "?"},
-   {"id": "garson", "name": "Garson", "min": 150, "max": 350, "emoji": "??"},
-   {"id": "yazilimci", "name": "Yaz?l?mc?", "min": 250, "max": 600, "emoji": "?"},
-   {"id": "temizlikci", "name": "Temizlikçi", "min": 120, "max": 280, "emoji": "?"},
-   {"id": "streamer", "name": "Streamer", "min": 100, "max": 700, "emoji": "?"},
-   {"id": "taksici", "name": "Taksici", "min": 200, "max": 450, "emoji": "?"},
-   {"id": "asci", "name": "A?ç?", "min": 170, "max": 380, "emoji": "???"},
-   {"id": "bekci", "name": "Bekçi", "min": 140, "max": 300, "emoji": "??"},
+   {"id": "kurye", "name": "Kurye", "min": 180, "max": 420, "emoji": "📦"},
+   {"id": "garson", "name": "Garson", "min": 150, "max": 350, "emoji": "🍽️"},
+   {"id": "yazilimci", "name": "Yazılımcı", "min": 250, "max": 600, "emoji": "💻"},
+   {"id": "temizlikci", "name": "Temizlikçi", "min": 120, "max": 280, "emoji": "🧹"},
+   {"id": "streamer", "name": "Streamer", "min": 100, "max": 700, "emoji": "🎥"},
+   {"id": "taksici", "name": "Taksici", "min": 200, "max": 450, "emoji": "🚕"},
+   {"id": "asci", "name": "Aşçı", "min": 170, "max": 380, "emoji": "👨‍🍳"},
+   {"id": "bekci", "name": "Bekçi", "min": 140, "max": 300, "emoji": "🛡️"},
 ]
 
 def ekonomi_verisi_al(guild_id, user_id):
@@ -772,36 +772,36 @@ MARKET_ITEMS = {
    "xp_boost": {
        "name": "XP Boost (1 Saat)",
        "price": 2500,
-       "emoji": "?",
-       "description": "1 saat boyunca %50 daha fazla XP kazan?rs?n.",
+       "emoji": "⚡",
+       "description": "1 saat boyunca %50 daha fazla XP kazanırsın.",
        "type": "boost"
    },
    "para_boost": {
        "name": "Para Boost (1 Saat)",
        "price": 3000,
-       "emoji": "?",
-       "description": "1 saat boyunca work'ten %50 daha fazla para kazan?rs?n.",
+       "emoji": "💰",
+       "description": "1 saat boyunca work'ten %50 daha fazla para kazanırsın.",
        "type": "boost"
    },
    "sansli_kutu": {
-       "name": "?ansl? Kutu",
+       "name": "Şanslı Kutu",
        "price": 1500,
-       "emoji": "?",
-       "description": "Aç?nca rastgele para veya item ç?kar.",
+       "emoji": "🎁",
+       "description": "Açınca rastgele para veya item çıkar.",
        "type": "consumable"
    },
    "koruma": {
-       "name": "Soygun Korumas?",
+       "name": "Soygun Koruması",
        "price": 2000,
-       "emoji": "??",
-       "description": "1 soyguna kar?? koruma sa?lar.",
+       "emoji": "🛡️",
+       "description": "1 soyguna karşı koruma sağlar.",
        "type": "consumable"
    },
    "vip_rol": {
        "name": "VIP Rolü (30 Gün)",
        "price": 15000,
-       "emoji": "?",
-       "description": "30 gün boyunca özel VIP rolü al?rs?n.",
+       "emoji": "👑",
+       "description": "30 gün boyunca özel VIP rolü alırsın.",
        "type": "role"
    }
 }
@@ -865,7 +865,7 @@ async def seviye_mesaj_kanali_al(varsayilan_kanal):
        try:
            kanal_id = int(SEVIYE_KANAL_ID)
        except ValueError:
-           print(f"SEVIYE_KANAL_ID geçerli bir say? de?il: {SEVIYE_KANAL_ID}")
+           print(f"SEVIYE_KANAL_ID geçerli bir sayı değil: {SEVIYE_KANAL_ID}")
            return varsayilan_kanal
 
        kanal = client.get_channel(kanal_id)
@@ -876,11 +876,11 @@ async def seviye_mesaj_kanali_al(varsayilan_kanal):
            kanal = await client.fetch_channel(kanal_id)
            return kanal
        except discord.NotFound:
-           print(f"SEVIYE_KANAL_ID ({SEVIYE_KANAL_ID}) ile e?le?en bir kanal yok.")
+           print(f"SEVIYE_KANAL_ID ({SEVIYE_KANAL_ID}) ile eşleşen bir kanal yok.")
        except discord.Forbidden:
-           print(f"SEVIYE_KANAL_ID ({SEVIYE_KANAL_ID}) kanal?n? görme izni yok!")
+           print(f"SEVIYE_KANAL_ID ({SEVIYE_KANAL_ID}) kanalını görme izni yok!")
        except Exception as e:
-           print(f"SEVIYE_KANAL_ID kanal? çekilemedi: {e}")
+           print(f"SEVIYE_KANAL_ID kanal çekilemedi: {e}")
 
    return varsayilan_kanal
 
@@ -897,19 +897,19 @@ async def seviye_rolu_ver(member, yeni_seviye):
        try:
            rol = await guild.create_role(name=rol_adi, reason="Seviye ödülü rolü")
        except discord.Forbidden:
-           print("Rol olu?turma izni yok! Bot'a 'Rolleri Yönet' izni ver.")
+           print("Rol oluşturma izni yok! Bot'a 'Rolleri Yönet' izni ver.")
            return None
        except Exception as e:
-           print(f"Rol olu?turma hatas?: {e}")
+           print(f"Rol oluşturma hatası: {e}")
            return None
 
    try:
-       await member.add_roles(rol, reason="Seviye atlad?")
+       await member.add_roles(rol, reason="Seviye atladı")
    except discord.Forbidden:
-       print("Rol verme izni yok! Bot rolünü rol hiyerar?isinde yukar? ta??.")
+       print("Rol verme izni yok! Bot rolünü rol hiyerarşisinde yukarı taşı.")
        return None
    except Exception as e:
-       print(f"Rol verme hatas?: {e}")
+       print(f"Rol verme hatası: {e}")
        return None
 
    onceki_seviye = yeni_seviye - 5
@@ -917,9 +917,9 @@ async def seviye_rolu_ver(member, yeni_seviye):
        onceki_rol = discord.utils.get(guild.roles, name=f"Level {onceki_seviye}")
        if onceki_rol and onceki_rol in member.roles:
            try:
-               await member.remove_roles(onceki_rol, reason="Yeni seviye rolüyle de?i?tirildi")
+               await member.remove_roles(onceki_rol, reason="Yeni seviye rolüyle değiştirildi")
            except Exception as e:
-               print(f"Eski rol kald?rma hatas?: {e}")
+               print(f"Eski rol kaldırma hatası: {e}")
 
    return rol
 
@@ -945,14 +945,14 @@ def seviye_atlama_embed(member, yeni_seviye, kazanilan_rol=None):
    return embed
 
 TRIVIA_SORULARI = [
-   # ==================== AN?ME (280 soru) ====================
+   # ==================== ANİME (280 soru) ====================
    # Buraya senin orijinal TRIVIA_SORULARI listeni koy
 ]
 
 
 @client.event
 async def on_ready():
-   print(f"? Logged in as {client.user} (ID: {client.user.id})")
+   print(f"✅ Logged in as {client.user} (ID: {client.user.id})")
    try:
        await asyncio.to_thread(init_db)
        def _db_startup_health():
@@ -961,12 +961,12 @@ async def on_ready():
                return int(cur.fetchone()['n'])
        level_rows = await asyncio.to_thread(_db_startup_health)
        print(
-           f"? Seviye listener aktif - guild_messages={intents.guild_messages} "
+           f"✅ Seviye listener aktif - guild_messages={intents.guild_messages} "
            f"- message_content={intents.message_content} - dbRows={level_rows}"
        )
    except Exception as e:
-       print(f"? Database ba?lat?lamad?: {type(e).__name__}: {e}")
-       print("? Seviye sistemi DB düzelene kadar kay?t yapamaz; di?er bot özellikleri çal??maya devam eder.")
+       print(f"❌ Database başlatılamadı: {type(e).__name__}: {e}")
+       print("⚠️ Seviye sistemi DB düzelene kadar kayıt yapamaz; diğer bot özellikleri çalışmaya devam eder.")
    # Bot yeniden basladiginda o anda seste olan uyeler icin yeni oturum ac.
    try:
        for guild in client.guilds:
@@ -979,12 +979,12 @@ async def on_ready():
    except Exception as e:
        print(f"Ses oturumlari baslatilamadi: {type(e).__name__}: {e}")
 
-   print("Bot haz?r!")
+   print("Bot hazır!")
    try:
        synced = await tree.sync()
        print(f"Komutlar sync edildi: {len(synced)} adet")
    except Exception as e:
-       print(f"Sync hatas? (önemsiz olabilir): {e}")
+       print(f"Sync hatası (önemsiz olabilir): {e}")
 
 
 @client.event
@@ -1001,7 +1001,7 @@ async def on_message(message):
    user_id = message.author.id
    if LEVEL_DEBUG:
        print(
-           f"? XP event al?nd? - guild={guild_id} - user={user_id} "
+           f"📩 XP event alındı - guild={guild_id} - user={user_id} "
            f"- contentLen={len(message.content or '')}"
        )
 
@@ -1015,13 +1015,13 @@ async def on_message(message):
                saat = kalan // 3600
                dakika = (kalan % 3600) // 60
                await message.channel.send(
-                   f"? {message.author.mention}, günlük ödülünü zaten ald?n! "
+                   f"⏳ {message.author.mention}, günlük ödülünü zaten aldın! "
                    f"Tekrar almak için **{saat} saat {dakika} dakika** beklemen gerekiyor."
                )
                return
 
            await message.channel.send(
-               f"? {message.author.mention}, günlük ödülünü ald?n: **+{kazanilan_xp} XP**!"
+               f"🎁 {message.author.mention}, günlük ödülünü aldın: **+{kazanilan_xp} XP**!"
            )
 
            if int(veri["seviye"]) > onceki_seviye:
@@ -1030,9 +1030,9 @@ async def on_message(message):
                hedef_kanal = await seviye_mesaj_kanali_al(message.channel)
                await hedef_kanal.send(embed=embed)
        except Exception as e:
-           print(f"? !köledailyxp DB/seviye hatas?: {type(e).__name__}: {e}")
+           print(f"❌ !köledailyxp DB/seviye hatası: {type(e).__name__}: {e}")
            await message.channel.send(
-               "? Seviye veritaban?na ?u anda ula??lam?yor. XP kayb? olmamas? için ödül uygulanmad?."
+               "❌ Seviye veritabanına şu anda ulaşılamıyor. XP kaybı olmaması için ödül uygulanmadı."
            )
        return
 
@@ -1046,7 +1046,7 @@ async def on_message(message):
        level_runtime_stats['saved'] += 1
        if LEVEL_DEBUG:
            print(
-               f"? XP kaydedildi - guild={guild_id} - user={user_id} "
+               f"✅ XP kaydedildi - guild={guild_id} - user={user_id} "
                f"- xp={veri['xp']} - level={veri['seviye']} - messages={veri['mesaj_sayisi']}"
            )
 
@@ -1057,7 +1057,7 @@ async def on_message(message):
            await hedef_kanal.send(embed=embed)
    except Exception as e:
        level_runtime_stats['errors'] += 1
-       print(f"? Seviye sistemi DB hatas?: {type(e).__name__}: {e}")
+       print(f"❌ Seviye sistemi DB hatası: {type(e).__name__}: {e}")
 
 
 
@@ -1084,12 +1084,12 @@ async def on_voice_state_update(member, before, after):
        print(f"Ses istatistigi hatasi: {type(e).__name__}: {e}")
 
 
-@tree.command(name="dbdurum", description="Seviye veritaban? ve mesaj dinleyicisinin durumunu gösterir.")
+@tree.command(name="dbdurum", description="Seviye veritabanı ve mesaj dinleyicisinin durumunu gösterir.")
 async def dbdurum(interaction: discord.Interaction):
    await interaction.response.defer(ephemeral=True)
    try:
        if interaction.guild_id is None:
-           await interaction.followup.send("Bu komut yaln?zca sunucuda kullan?labilir.", ephemeral=True)
+           await interaction.followup.send("Bu komut yalnızca sunucuda kullanılabilir.", ephemeral=True)
            return
 
        def _health():
@@ -1101,42 +1101,42 @@ async def dbdurum(interaction: discord.Interaction):
 
        row_count = await asyncio.to_thread(_health)
        await interaction.followup.send(
-           "? **Seviye sistemi durumu**\n"
-           f"- PostgreSQL: **ba?l?**\n"
-           f"- Bu sunucudaki kay?t: **{row_count}**\n"
+           "✅ **Seviye sistemi durumu**\n"
+           f"- PostgreSQL: **bağlı**\n"
+           f"- Bu sunucudaki kayıt: **{row_count}**\n"
            f"- Mesaj event'i: **{level_runtime_stats['events']}**\n"
-           f"- Ba?ar?l? XP kayd?: **{level_runtime_stats['saved']}**\n"
-           f"- XP kay?t hatas?: **{level_runtime_stats['errors']}**\n"
+           f"- Başarılı XP kaydı: **{level_runtime_stats['saved']}**\n"
+           f"- XP kayıt hatası: **{level_runtime_stats['errors']}**\n"
            f"- Mesaj intent: **{intents.guild_messages}**\n"
            f"- Message Content: **{intents.message_content}**",
            ephemeral=True,
        )
    except Exception as e:
        await interaction.followup.send(
-           f"? PostgreSQL testi ba?ar?s?z: `{type(e).__name__}: {e}`",
+           f"❌ PostgreSQL testi başarısız: `{type(e).__name__}: {e}`",
            ephemeral=True,
        )
 
 
 @tree.error
 async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
-   print(f"Komut hatas?: {error}")
+   print(f"Komut hatası: {error}")
    try:
        if interaction.response.is_done():
-           await interaction.followup.send("Bir hata olu?tu, lütfen tekrar dene.", ephemeral=True)
+           await interaction.followup.send("Bir hata oluştu, lütfen tekrar dene.", ephemeral=True)
        else:
-           await interaction.response.send_message("Bir hata olu?tu, lütfen tekrar dene.", ephemeral=True)
+           await interaction.response.send_message("Bir hata oluştu, lütfen tekrar dene.", ephemeral=True)
    except:
        pass
 
 
-@tree.command(name="ask", description="Yapay zekaya soru sorars?n.")
+@tree.command(name="ask", description="Yapay zekaya soru sorarsın.")
 @app_commands.describe(soru="Sorulacak soru")
 async def ask(interaction: discord.Interaction, soru: str):
    await interaction.response.defer()
    try:
        if not groq_client:
-           await interaction.followup.send("Groq API anahtar? bulunamad?!")
+           await interaction.followup.send("Groq API anahtarı bulunamadı!")
            return
 
        chat_completion = groq_client.chat.completions.create(
@@ -1144,7 +1144,7 @@ async def ask(interaction: discord.Interaction, soru: str):
            messages=[
                {
                    "role": "system",
-                   "content": "Sen kibar, tarafs?z, net ve profesyonel bir Discord asistan?s?n. A??r? samimi hitaplar kullanma, küfür etme, do?rudan ve anla??l?r cevaplar ver."
+                   "content": "Sen kibar, tarafsız, net ve profesyonel bir Discord asistanısın. Aşırı samimi hitaplar kullanma, küfür etme, doğrudan ve anlaşılır cevaplar ver."
                },
                {"role": "user", "content": soru},
            ],
@@ -1154,30 +1154,30 @@ async def ask(interaction: discord.Interaction, soru: str):
            response_text = response_text[:1993] + "\n..."
        await interaction.followup.send(response_text)
    except Exception as e:
-       print(f"/ask hatas?: {e}")
-       await interaction.followup.send(f"Bir hata olu?tu: {e}")
+       print(f"/ask hatası: {e}")
+       await interaction.followup.send(f"Bir hata oluştu: {e}")
 
 
-@tree.command(name="seviye", description="Seviyeni, XP'ni ve mesaj say?n? gösterir.")
-@app_commands.describe(kullanici="Seviyesini görmek istedi?in ki?i (bo? b?rak?rsan kendini gösterir)")
+@tree.command(name="seviye", description="Seviyeni, XP'ni ve mesaj sayını gösterir.")
+@app_commands.describe(kullanici="Seviyesini görmek istediğin kişi (boş bırakırsan kendini gösterir)")
 async def seviye(interaction: discord.Interaction, kullanici: discord.Member = None):
    await interaction.response.defer()
    try:
        if interaction.guild_id is None:
-           await interaction.followup.send("Bu komut yaln?zca bir sunucuda kullan?labilir.")
+           await interaction.followup.send("Bu komut yalnızca bir sunucuda kullanılabilir.")
            return
        hedef = kullanici or interaction.user
        veri = await asyncio.to_thread(kullanici_verisi_al, interaction.guild_id, hedef.id)
        metin = (
-           f"? **{hedef.display_name}** için istatistikler\n\n"
-           f"? Seviye: **{veri['seviye']}**\n"
-           f"? XP: **{veri['xp']} / {veri['sonraki_seviye_xp']}**\n"
-           f"? Mesaj say?s?: **{veri['mesaj_sayisi']}**"
+           f"📊 **{hedef.display_name}** için istatistikler\n\n"
+           f"⭐ Seviye: **{veri['seviye']}**\n"
+           f"✨ XP: **{veri['xp']} / {veri['sonraki_seviye_xp']}**\n"
+           f"💬 Mesaj sayısı: **{veri['mesaj_sayisi']}**"
        )
        await interaction.followup.send(metin)
    except Exception as e:
-       print(f"/seviye hatas?: {e}")
-       await interaction.followup.send("Bir hata olu?tu.")
+       print(f"/seviye hatası: {e}")
+       await interaction.followup.send("Bir hata oluştu.")
 
 
 
@@ -1307,16 +1307,16 @@ async def sesiralama(interaction: discord.Interaction):
        await interaction.followup.send("Ses siralamasi alinirken bir hata olustu.")
 
 
-@tree.command(name="s?ralama", description="Seviye s?ralama tablosunu gösterir (ilk 10 ki?i).")
+@tree.command(name="sıralama", description="Seviye sıralama tablosunu gösterir (ilk 10 kişi).")
 async def siralama(interaction: discord.Interaction):
    await interaction.response.defer()
    try:
        if interaction.guild_id is None:
-           await interaction.followup.send("Bu komut yaln?zca bir sunucuda kullan?labilir.")
+           await interaction.followup.send("Bu komut yalnızca bir sunucuda kullanılabilir.")
            return
        seviye_verileri = await asyncio.to_thread(tum_seviye_verilerini_al, interaction.guild_id)
        if not seviye_verileri:
-           await interaction.followup.send("Henüz kimse XP kazanmam??.")
+           await interaction.followup.send("Henüz kimse XP kazanmamış.")
            return 
 
        siralanmis = sorted(
@@ -1325,7 +1325,7 @@ async def siralama(interaction: discord.Interaction):
            reverse=True,
        )[:10]
 
-       madalyalar = ["?", "?", "?"]
+       madalyalar = ["🥇", "🥈", "🥉"]
        satirlar = []
        for i, (uid, veri) in enumerate(siralanmis):
            sira_simge = madalyalar[i] if i < 3 else f"**{i + 1}.**"
@@ -1334,42 +1334,42 @@ async def siralama(interaction: discord.Interaction):
                f"({veri['xp']}/{veri['sonraki_seviye_xp']} XP, {veri['mesaj_sayisi']} mesaj)"
            )
 
-       metin = "? **SIRALAMA TABLOSU** ?\n\n" + "\n".join(satirlar)
+       metin = "🏆 **SIRALAMA TABLOSU** 🏆\n\n" + "\n".join(satirlar)
        await interaction.followup.send(metin)
    except Exception as e:
-       print(f"/s?ralama hatas?: {e}")
-       await interaction.followup.send("Bir hata olu?tu.")
+       print(f"/sıralama hatası: {e}")
+       await interaction.followup.send("Bir hata oluştu.")
 
 
-@tree.command(name="tkm", description="Bot ile Ta?, Ka??t, Makas oynars?n.")
+@tree.command(name="tkm", description="Bot ile Taş, Kağıt, Makas oynarsın.")
 @app_commands.choices(secim=[
-   app_commands.Choice(name="Ta?", value="ta?"),
-   app_commands.Choice(name="Ka??t", value="ka??t"),
+   app_commands.Choice(name="Taş", value="taş"),
+   app_commands.Choice(name="Kağıt", value="kağıt"),
    app_commands.Choice(name="Makas", value="makas")
 ])
 async def tkm(interaction: discord.Interaction, secim: app_commands.Choice[str]):
    await interaction.response.defer()
    try:
-       bot_secimi = random.choice(["ta?", "ka??t", "makas"])
+       bot_secimi = random.choice(["taş", "kağıt", "makas"])
        kullanici_secimi = secim.value
 
        if kullanici_secimi == bot_secimi:
-           sonuc = "? **Berabere.**"
-       elif ((kullanici_secimi == "ta?" and bot_secimi == "makas") or
-             (kullanici_secimi == "ka??t" and bot_secimi == "ta?") or
-             (kullanici_secimi == "makas" and bot_secimi == "ka??t")):
-           sonuc = "? **Tebrikler, kazand?n?z!**"
+           sonuc = "🤝 **Berabere.**"
+       elif ((kullanici_secimi == "taş" and bot_secimi == "makas") or
+             (kullanici_secimi == "kağıt" and bot_secimi == "taş") or
+             (kullanici_secimi == "makas" and bot_secimi == "kağıt")):
+           sonuc = "🎉 **Tebrikler, kazandınız!**"
        else:
-           sonuc = "? **Kaybettiniz.**"
+           sonuc = "😢 **Kaybettiniz.**"
 
        await interaction.followup.send(f"Seçiminiz: **{kullanici_secimi}**\nBotun seçimi: **{bot_secimi}**\n\n{sonuc}")
    except Exception as e:
-       print(f"/tkm hatas?: {e}")
-       await interaction.followup.send("Bir hata olu?tu.")
+       print(f"/tkm hatası: {e}")
+       await interaction.followup.send("Bir hata oluştu.")
 
 
-@tree.command(name="tahmin", description="1-100 aras? tutulan say?y? tahmin etme oyunu.")
-@app_commands.describe(sayi="1-100 aras? bir say? girin")
+@tree.command(name="tahmin", description="1-100 arası tutulan sayıyı tahmin etme oyunu.")
+@app_commands.describe(sayi="1-100 arası bir sayı girin")
 async def tahmin(interaction: discord.Interaction, sayi: int):
    await interaction.response.defer()
    try:
@@ -1380,37 +1380,37 @@ async def tahmin(interaction: discord.Interaction, sayi: int):
        gizli = aktif_oyunlar[user_id]
        if sayi == gizli:
            del aktif_oyunlar[user_id]
-           await interaction.followup.send(f"? **Tebrikler!** Do?ru say? **{gizli}** idi.")
+           await interaction.followup.send(f"🎉 **Tebrikler!** Doğru sayı **{gizli}** idi.")
        elif sayi < gizli:
-           await interaction.followup.send("? Daha **büyük** bir say? deneyin.")
+           await interaction.followup.send("⬆️ Daha **büyük** bir sayı deneyin.")
        else:
-           await interaction.followup.send("? Daha **küçük** bir say? deneyin.")
+           await interaction.followup.send("⬇️ Daha **küçük** bir sayı deneyin.")
    except Exception as e:
-       print(f"/tahmin hatas?: {e}")
-       await interaction.followup.send("Bir hata olu?tu.")
+       print(f"/tahmin hatası: {e}")
+       await interaction.followup.send("Bir hata oluştu.")
 
 
-@tree.command(name="slot", description="Slot makinesini çevirip ?ans?n?z? denersiniz.")
+@tree.command(name="slot", description="Slot makinesini çevirip şansınızı denersiniz.")
 async def slot(interaction: discord.Interaction):
    await interaction.response.defer()
    try:
-       semboller = ["?", "?", "?", "?", "?", "?"]
+       semboller = ["🍒", "🍋", "🍊", "🍇", "💎", "7️⃣"]
        c1 = random.choice(semboller)
        c2 = random.choice(semboller)
        c3 = random.choice(semboller)
 
-       sonuc_metni = f"? **[ {c1} | {c2} | {c3} ]** ?\n\n"
+       sonuc_metni = f"🎰 **[ {c1} | {c2} | {c3} ]** 🎰\n\n"
        if c1 == c2 == c3:
-           sonuc_metni += "? **Büyük ?kramiye! Üçlü e?le?ti, kazand?n?z!**"
+           sonuc_metni += "🎉 **Büyük ikramiye! Üçlü eşleşti, kazandınız!**"
        elif c1 == c2 or c2 == c3 or c1 == c3:
-           sonuc_metni += "? **?kili e?le?ti! Fena de?il.**"
+           sonuc_metni += "👍 **İkili eşleşti! Fena değil.**"
        else:
-           sonuc_metni += "? **Kaybettiniz, ?ans?n?z? tekrar deneyin.**"
+           sonuc_metni += "😢 **Kaybettiniz, şansınızı tekrar deneyin.**"
 
        await interaction.followup.send(sonuc_metni)
    except Exception as e:
-       print(f"/slot hatas?: {e}")
-       await interaction.followup.send("Bir hata olu?tu.")
+       print(f"/slot hatası: {e}")
+       await interaction.followup.send("Bir hata oluştu.")
 
 
 class BilgiYarismasiView(discord.ui.View):
@@ -1442,12 +1442,12 @@ class BilgiYarismasiView(discord.ui.View):
 
            if secilen_metin == self.dogru_cevap:
                await interaction.response.send_message(
-                   f"? **Tebrikler {interaction.user.name}, do?ru cevap!** (`{self.dogru_cevap}`)",
+                   f"✅ **Tebrikler {interaction.user.name}, doğru cevap!** (`{self.dogru_cevap}`)",
                    ephemeral=False
                )
            else:
                await interaction.response.send_message(
-                   f"? **Yanl?? cevap!** Do?ru cevap: **{self.dogru_cevap}** olmal?yd?.",
+                   f"❌ **Yanlış cevap!** Doğru cevap: **{self.dogru_cevap}** olmalıydı.",
                    ephemeral=True
                )
 
@@ -1455,14 +1455,14 @@ class BilgiYarismasiView(discord.ui.View):
                child.disabled = True
            await interaction.message.edit(view=self)
        except Exception as e:
-           print(f"View hatas?: {e}")
+           print(f"View hatası: {e}")
            try:
-               await interaction.response.send_message("Bir hata olu?tu.", ephemeral=True)
+               await interaction.response.send_message("Bir hata oluştu.", ephemeral=True)
            except:
                pass
 
 
-@tree.command(name="bilgi-yarismasi", description="Butonlu genel kültür bilgi yar??mas? ba?lat?r.")
+@tree.command(name="bilgi-yarismasi", description="Butonlu genel kültür bilgi yarışması başlatır.")
 async def bilgi_yarismasi(interaction: discord.Interaction):
    await interaction.response.defer()
    try:
@@ -1474,83 +1474,83 @@ async def bilgi_yarismasi(interaction: discord.Interaction):
        view = BilgiYarismasiView(dogru, secenekler)
 
        metin = (
-           f"? **B?LG? YARI?MASI**\n\n"
-           f"? **Soru:** {veri['soru']}\n\n"
+           f"🧠 **BİLGİ YARIŞMASI**\n\n"
+           f"❓ **Soru:** {veri['soru']}\n\n"
            f"A) {secenekler[0]}\n"
            f"B) {secenekler[1]}\n"
            f"C) {secenekler[2]}\n"
            f"D) {secenekler[3]}\n\n"
-           f"*A?a??daki butonlardan do?ru ??kk? seç!*"
+           f"*Aşağıdaki butonlardan doğru şıkkı seç!*"
        )
        await interaction.followup.send(metin, view=view)
    except Exception as e:
-       print(f"/bilgi-yarismasi hatas?: {e}")
-       await interaction.followup.send("Bir hata olu?tu.")
+       print(f"/bilgi-yarismasi hatası: {e}")
+       await interaction.followup.send("Bir hata oluştu.")
 
 
-@tree.command(name="kasa-ac", description="Gizli bir kasa açarak içinden ne ç?kaca??n? görürsün.")
+@tree.command(name="kasa-ac", description="Gizli bir kasa açarak içinden ne çıkacağını görürsün.")
 async def kasa_ac(interaction: discord.Interaction):
    await interaction.response.defer()
    try:
        oduller = [
-           "Bo? ç?kt?! ?",
-           "10 Alt?n kazand?n! ?",
-           "Efsanevi K?l?ç ç?kt?! ?",
-           "Lanetli Ta? ç?kt?, puan?n silindi! ?",
-           "100 Elmas kazand?n! ?",
-           "Küçük bir iksir buldun! ?"
+           "Boş çıktı! 💨",
+           "10 Altın kazandın! 🪙",
+           "Efsanevi Kılıç çıktı! ⚔️",
+           "Lanetli Taş çıktı, puanın silindi! 💀",
+           "100 Elmas kazandın! 💎",
+           "Küçük bir iksir buldun! 🧪"
        ]
        cikan = random.choice(oduller)
-       await interaction.followup.send(f"? **Kasa aç?l?yor...**\n\n?çinden ç?kan: **{cikan}**")
+       await interaction.followup.send(f"📦 **Kasa açılıyor...**\n\nİçinden çıkan: **{cikan}**")
    except Exception as e:
-       print(f"/kasa-ac hatas?: {e}")
-       await interaction.followup.send("Bir hata olu?tu.")
+       print(f"/kasa-ac hatası: {e}")
+       await interaction.followup.send("Bir hata oluştu.")
 
 
-@tree.command(name="zardüellosu", description="Bot ile zar düellosu yapars?n?z (Büyük atan kazan?r).")
+@tree.command(name="zardüellosu", description="Bot ile zar düellosu yaparsınız (Büyük atan kazanır).")
 async def zardüellosu(interaction: discord.Interaction):
    await interaction.response.defer()
    try:
        oyuncu_zar = random.randint(1, 6)
        bot_zar = random.randint(1, 6)
 
-       metin = f"? Senin att???n zar: **{oyuncu_zar}**\n? Benim att???m zar: **{bot_zar}**\n\n"
+       metin = f"🎲 Senin attığın zar: **{oyuncu_zar}**\n🎲 Benim attığım zar: **{bot_zar}**\n\n"
        if oyuncu_zar > bot_zar:
-           metin += "? **Düelloyu kazand?n!**"
+           metin += "🎉 **Düelloyu kazandın!**"
        elif oyuncu_zar < bot_zar:
-           metin += "? **Düelloyu kaybettin!**"
+           metin += "😢 **Düelloyu kaybettin!**"
        else:
-           metin += "? **Zarlar e?it, berabere!**"
+           metin += "🤝 **Zarlar eşit, berabere!**"
 
        await interaction.followup.send(metin)
    except Exception as e:
-       print(f"/zardüellosu hatas?: {e}")
-       await interaction.followup.send("Bir hata olu?tu.")
+       print(f"/zardüellosu hatası: {e}")
+       await interaction.followup.send("Bir hata oluştu.")
 
 
-@tree.command(name="yazitura", description="Klasik yaz? tura atma oyunu.")
+@tree.command(name="yazitura", description="Klasik yazı tura atma oyunu.")
 @app_commands.choices(secim=[
-   app_commands.Choice(name="Yaz?", value="yaz?"),
+   app_commands.Choice(name="Yazı", value="yazı"),
    app_commands.Choice(name="Tura", value="tura")
 ])
 async def yazitura(interaction: discord.Interaction, secim: app_commands.Choice[str]):
    await interaction.response.defer()
    try:
-       sonuc = random.choice(["yaz?", "tura"])
+       sonuc = random.choice(["yazı", "tura"])
        kullanici_secimi = secim.value
 
        if kullanici_secimi == sonuc:
-           durum = f"? Para **{sonuc.upper()}** geldi! Kazand?n?z!"
+           durum = f"✅ Para **{sonuc.upper()}** geldi! Kazandınız!"
        else:
-           durum = f"? Para **{sonuc.upper()}** geldi! Kaybettiniz."
+           durum = f"❌ Para **{sonuc.upper()}** geldi! Kaybettiniz."
 
        await interaction.followup.send(durum)
    except Exception as e:
-       print(f"/yazitura hatas?: {e}")
-       await interaction.followup.send("Bir hata olu?tu.")
+       print(f"/yazitura hatası: {e}")
+       await interaction.followup.send("Bir hata oluştu.")
 
 
-# ================= EKONOM? KOMUTLARI =================
+# ================= EKONOMİ KOMUTLARI =================
 
 class WorkView(discord.ui.View):
    def __init__(self, user_id: int):
@@ -1562,7 +1562,7 @@ class WorkView(discord.ui.View):
                label=job["name"],
                value=job["id"],
                emoji=job["emoji"],
-               description=f"{job['min']} - {job['max']} ?"
+               description=f"{job['min']} - {job['max']} 💰"
            ) for job in WORK_JOBS
        ]
        self.select = discord.ui.Select(placeholder="Meslek seç...", options=options)
@@ -1571,7 +1571,7 @@ class WorkView(discord.ui.View):
 
    async def job_secildi(self, interaction: discord.Interaction):
        if interaction.user.id != self.user_id:
-           await interaction.response.send_message("Bu menü sana ait de?il!", ephemeral=True)
+           await interaction.response.send_message("Bu menü sana ait değil!", ephemeral=True)
            return
 
        job_id = self.select.values[0]
@@ -1587,17 +1587,17 @@ class WorkView(discord.ui.View):
                    dakika = data // 60
                    saniye = data % 60
                    await interaction.followup.send(
-                       f"? Daha **{dakika} dakika {saniye} saniye** beklemelisin.",
+                       f"⏳ Daha **{dakika} dakika {saniye} saniye** beklemelisin.",
                        ephemeral=True
                    )
                else:
-                   await interaction.followup.send(f"? {data}", ephemeral=True)
+                   await interaction.followup.send(f"❌ {data}", ephemeral=True)
                return
 
            job = data
            embed = discord.Embed(
-               title=f"{job['emoji']} {job['name']} olarak çal??t?n!",
-               description=f"**+{kazanilan} ?** kazand?n.\nYeni bakiyen: **{yeni_para} ?**",
+               title=f"{job['emoji']} {job['name']} olarak çalıştın!",
+               description=f"**+{kazanilan} 💰** kazandın.\nYeni bakiyen: **{yeni_para} 💰**",
                color=0x57F287
            )
            await interaction.followup.send(embed=embed)
@@ -1607,17 +1607,17 @@ class WorkView(discord.ui.View):
            await interaction.message.edit(view=self)
 
        except Exception as e:
-           print(f"/work hatas?: {e}")
-           await interaction.followup.send("Bir hata olu?tu.", ephemeral=True)
+           print(f"/work hatası: {e}")
+           await interaction.followup.send("Bir hata oluştu.", ephemeral=True)
 
 
-@tree.command(name="bal", description="Paran? veya ba?kas?n?n paras?n? gösterir.")
-@app_commands.describe(kullanici="Bakmak istedi?in ki?i (bo? b?rak?rsan kendini gösterir)")
+@tree.command(name="bal", description="Paranı veya başkasının parasını gösterir.")
+@app_commands.describe(kullanici="Bakmak istediğin kişi (boş bırakırsan kendini gösterir)")
 async def bal(interaction: discord.Interaction, kullanici: discord.Member = None):
    await interaction.response.defer()
    try:
        if interaction.guild_id is None:
-           await interaction.followup.send("Bu komut sadece sunucuda kullan?labilir.")
+           await interaction.followup.send("Bu komut sadece sunucuda kullanılabilir.")
            return
 
        hedef = kullanici or interaction.user
@@ -1625,22 +1625,22 @@ async def bal(interaction: discord.Interaction, kullanici: discord.Member = None
        para = int(veri.get("para", 0))
 
        embed = discord.Embed(
-           title=f"? {hedef.display_name} bakiyesi",
-           description=f"**{para} ?**",
+           title=f"💰 {hedef.display_name} bakiyesi",
+           description=f"**{para} 💰**",
            color=0xFEE75C
        )
        await interaction.followup.send(embed=embed)
    except Exception as e:
-       print(f"/bal hatas?: {e}")
-       await interaction.followup.send("Bir hata olu?tu.")
+       print(f"/bal hatası: {e}")
+       await interaction.followup.send("Bir hata oluştu.")
 
 
-@tree.command(name="daily", description="Günlük para ödülünü al?rs?n.")
+@tree.command(name="daily", description="Günlük para ödülünü alırsın.")
 async def daily(interaction: discord.Interaction):
    await interaction.response.defer()
    try:
        if interaction.guild_id is None:
-           await interaction.followup.send("Bu komut sadece sunucuda kullan?labilir.")
+           await interaction.followup.send("Bu komut sadece sunucuda kullanılabilir.")
            return
 
        basarili, kalan, kazanilan, yeni_para = await asyncio.to_thread(
@@ -1651,27 +1651,27 @@ async def daily(interaction: discord.Interaction):
            saat = kalan // 3600
            dakika = (kalan % 3600) // 60
            await interaction.followup.send(
-               f"? Günlük ödülünü zaten ald?n!\nTekrar almak için **{saat} saat {dakika} dakika** beklemelisin."
+               f"⏳ Günlük ödülünü zaten aldın!\nTekrar almak için **{saat} saat {dakika} dakika** beklemelisin."
            )
            return
 
        embed = discord.Embed(
-           title="? Günlük Ödül",
-           description=f"**+{kazanilan} ?** kazand?n!\nYeni bakiyen: **{yeni_para} ?**",
+           title="🎁 Günlük Ödül",
+           description=f"**+{kazanilan} 💰** kazandın!\nYeni bakiyen: **{yeni_para} 💰**",
            color=0x57F287
        )
        await interaction.followup.send(embed=embed)
    except Exception as e:
-       print(f"/daily hatas?: {e}")
-       await interaction.followup.send("Bir hata olu?tu.")
+       print(f"/daily hatası: {e}")
+       await interaction.followup.send("Bir hata oluştu.")
 
 
-@tree.command(name="work", description="Meslek seçip çal??arak para kazan?rs?n.")
+@tree.command(name="work", description="Meslek seçip çalışarak para kazanırsın.")
 async def work(interaction: discord.Interaction):
    await interaction.response.defer()
    try:
        if interaction.guild_id is None:
-           await interaction.followup.send("Bu komut sadece sunucuda kullan?labilir.")
+           await interaction.followup.send("Bu komut sadece sunucuda kullanılabilir.")
            return
 
        veri = await asyncio.to_thread(ekonomi_verisi_al, interaction.guild_id, interaction.user.id)
@@ -1682,37 +1682,37 @@ async def work(interaction: discord.Interaction):
            dakika = int(kalan) // 60
            saniye = int(kalan) % 60
            await interaction.followup.send(
-               f"? Daha **{dakika} dakika {saniye} saniye** beklemelisin.",
+               f"⏳ Daha **{dakika} dakika {saniye} saniye** beklemelisin.",
                ephemeral=True
            )
            return
 
        view = WorkView(interaction.user.id)
        embed = discord.Embed(
-           title="? Meslek Seç",
-           description="A?a??dan çal??mak istedi?in mesle?i seç:",
+           title="🛠️ Meslek Seç",
+           description="Aşağıdan çalışmak istediğin mesleği seç:",
            color=0x5865F2
        )
        await interaction.followup.send(embed=embed, view=view)
    except Exception as e:
-       print(f"/work hatas?: {e}")
-       await interaction.followup.send("Bir hata olu?tu.")
+       print(f"/work hatası: {e}")
+       await interaction.followup.send("Bir hata oluştu.")
 
 
-@tree.command(name="pay", description="Ba?ka birine para gönderirsin.")
-@app_commands.describe(kullanici="Para gönderece?in ki?i", miktar="Göndermek istedi?in miktar")
+@tree.command(name="pay", description="Başka birine para gönderirsin.")
+@app_commands.describe(kullanici="Para göndereceğin kişi", miktar="Göndermek istediğin miktar")
 async def pay(interaction: discord.Interaction, kullanici: discord.Member, miktar: int):
    await interaction.response.defer()
    try:
        if interaction.guild_id is None:
-           await interaction.followup.send("Bu komut sadece sunucuda kullan?labilir.")
+           await interaction.followup.send("Bu komut sadece sunucuda kullanılabilir.")
            return
 
        if kullanici.id == interaction.user.id:
            await interaction.followup.send("Kendine para gönderemezsin.")
            return
        if miktar <= 0:
-           await interaction.followup.send("Miktar 0'dan büyük olmal?.")
+           await interaction.followup.send("Miktar 0'dan büyük olmalı.")
            return
 
        gonderen = await asyncio.to_thread(ekonomi_verisi_al, interaction.guild_id, interaction.user.id)
@@ -1724,22 +1724,22 @@ async def pay(interaction: discord.Interaction, kullanici: discord.Member, mikta
        await asyncio.to_thread(para_ekle, interaction.guild_id, kullanici.id, miktar)
 
        embed = discord.Embed(
-           title="? Para Gönderildi",
-           description=f"{interaction.user.mention} ? {kullanici.mention}\n**{miktar} ?** gönderildi.",
+           title="💸 Para Gönderildi",
+           description=f"{interaction.user.mention} → {kullanici.mention}\n**{miktar} 💰** gönderildi.",
            color=0x57F287
        )
        await interaction.followup.send(embed=embed)
    except Exception as e:
-       print(f"/pay hatas?: {e}")
-       await interaction.followup.send("Bir hata olu?tu.")
+       print(f"/pay hatası: {e}")
+       await interaction.followup.send("Bir hata oluştu.")
 
 
-@tree.command(name="zenginler", description="Sunucudaki en zengin 10 ki?iyi gösterir.")
+@tree.command(name="zenginler", description="Sunucudaki en zengin 10 kişiyi gösterir.")
 async def zenginler(interaction: discord.Interaction):
    await interaction.response.defer()
    try:
        if interaction.guild_id is None:
-           await interaction.followup.send("Bu komut sadece sunucuda kullan?labilir.")
+           await interaction.followup.send("Bu komut sadece sunucuda kullanılabilir.")
            return
 
        def _get_top():
@@ -1756,24 +1756,24 @@ async def zenginler(interaction: discord.Interaction):
 
        rows = await asyncio.to_thread(_get_top)
        if not rows:
-           await interaction.followup.send("Henüz kimse para kazanmam??.")
+           await interaction.followup.send("Henüz kimse para kazanmamış.")
            return
 
-       madalyalar = ["?", "?", "?"]
+       madalyalar = ["🥇", "🥈", "🥉"]
        satirlar = []
        for i, row in enumerate(rows):
            sira = madalyalar[i] if i < 3 else f"**{i+1}.**"
-           satirlar.append(f"{sira} <@{row['user_id']}> - **{row['para']} ?**")
+           satirlar.append(f"{sira} <@{row['user_id']}> - **{row['para']} 💰**")
 
        embed = discord.Embed(
-           title="? En Zenginler",
+           title="💰 En Zenginler",
            description="\n".join(satirlar),
            color=0xFEE75C
        )
        await interaction.followup.send(embed=embed)
    except Exception as e:
-       print(f"/zenginler hatas?: {e}")
-       await interaction.followup.send("Bir hata olu?tu.")
+       print(f"/zenginler hatası: {e}")
+       await interaction.followup.send("Bir hata oluştu.")
 
 
 # ================= MARKET KOMUTLARI =================
@@ -1787,20 +1787,20 @@ class MarketView(discord.ui.View):
        for item_id, item in MARKET_ITEMS.items():
            options.append(
                discord.SelectOption(
-                   label=f"{item['name']} - {item['price']} ?",
+                   label=f"{item['name']} - {item['price']} 💰",
                    value=item_id,
                    emoji=item["emoji"],
                    description=item["description"][:50]
                )
            )
 
-       self.select = discord.ui.Select(placeholder="Sat?n almak istedi?in ürünü seç...", options=options)
+       self.select = discord.ui.Select(placeholder="Satın almak istediğin ürünü seç...", options=options)
        self.select.callback = self.urun_secildi
        self.add_item(self.select)
 
    async def urun_secildi(self, interaction: discord.Interaction):
        if interaction.user.id != self.user_id:
-           await interaction.response.send_message("Bu menü sana ait de?il!", ephemeral=True)
+           await interaction.response.send_message("Bu menü sana ait değil!", ephemeral=True)
            return
 
        item_id = self.select.values[0]
@@ -1813,42 +1813,42 @@ class MarketView(discord.ui.View):
            para = int(veri.get("para", 0))
 
            if para < item["price"]:
-               await interaction.followup.send(f"? Yeterli paran yok! Gerekli: **{item['price']} ?**", ephemeral=True)
+               await interaction.followup.send(f"❌ Yeterli paran yok! Gerekli: **{item['price']} 💰**", ephemeral=True)
                return
 
            await asyncio.to_thread(para_ekle, interaction.guild_id, interaction.user.id, -item["price"])
            await asyncio.to_thread(item_ekle, interaction.guild_id, interaction.user.id, item_id)
 
            embed = discord.Embed(
-               title="? Sat?n Alma Ba?ar?l?",
-               description=f"{item['emoji']} **{item['name']}** envanterine eklendi!\nÖdenen: **{item['price']} ?**",
+               title="✅ Satın Alma Başarılı",
+               description=f"{item['emoji']} **{item['name']}** envanterine eklendi!\nÖdenen: **{item['price']} 💰**",
                color=0x57F287
            )
            await interaction.followup.send(embed=embed)
 
        except Exception as e:
-           print(f"/market hatas?: {e}")
-           await interaction.followup.send("Bir hata olu?tu.", ephemeral=True)
+           print(f"/market hatası: {e}")
+           await interaction.followup.send("Bir hata oluştu.", ephemeral=True)
 
 
-@tree.command(name="market", description="Marketten ürün sat?n al?rs?n.")
+@tree.command(name="market", description="Marketten ürün satın alırsın.")
 async def market(interaction: discord.Interaction):
    await interaction.response.defer()
    try:
        if interaction.guild_id is None:
-           await interaction.followup.send("Bu komut sadece sunucuda kullan?labilir.")
+           await interaction.followup.send("Bu komut sadece sunucuda kullanılabilir.")
            return
 
        embed = discord.Embed(
-           title="? Market",
-           description="A?a??dan sat?n almak istedi?in ürünü seç:",
+           title="🛒 Market",
+           description="Aşağıdan satın almak istediğin ürünü seç:",
            color=0x5865F2
        )
 
        for item_id, item in MARKET_ITEMS.items():
            embed.add_field(
                name=f"{item['emoji']} {item['name']}",
-               value=f"**{item['price']} ?**\n{item['description']}",
+               value=f"**{item['price']} 💰**\n{item['description']}",
                inline=False
            )
 
@@ -1856,8 +1856,8 @@ async def market(interaction: discord.Interaction):
        await interaction.followup.send(embed=embed, view=view)
 
    except Exception as e:
-       print(f"/market hatas?: {e}")
-       await interaction.followup.send("Bir hata olu?tu.")
+       print(f"/market hatası: {e}")
+       await interaction.followup.send("Bir hata oluştu.")
 
 
 @tree.command(name="envanter", description="Envanterini gösterir.")
@@ -1865,17 +1865,17 @@ async def envanter(interaction: discord.Interaction):
    await interaction.response.defer()
    try:
        if interaction.guild_id is None:
-           await interaction.followup.send("Bu komut sadece sunucuda kullan?labilir.")
+           await interaction.followup.send("Bu komut sadece sunucuda kullanılabilir.")
            return
 
        envanter_data = await asyncio.to_thread(envanter_al, interaction.guild_id, interaction.user.id)
 
        if not envanter_data:
-           await interaction.followup.send("Envanterin bo?.")
+           await interaction.followup.send("Envanterin boş.")
            return
 
        embed = discord.Embed(
-           title=f"? {interaction.user.display_name} Envanteri",
+           title=f"🎒 {interaction.user.display_name} Envanteri",
            color=0xFEE75C
        )
 
@@ -1893,83 +1893,83 @@ async def envanter(interaction: discord.Interaction):
        await interaction.followup.send(embed=embed)
 
    except Exception as e:
-       print(f"/envanter hatas?: {e}")
-       await interaction.followup.send("Bir hata olu?tu.")
+       print(f"/envanter hatası: {e}")
+       await interaction.followup.send("Bir hata oluştu.")
 
 
-@tree.command(name="help", description="Botun tüm komutlar?n? ve ne i?e yarad?klar?n? gösterir.")
+@tree.command(name="help", description="Botun tüm komutlarını ve ne işe yaradıklarını gösterir.")
 async def help_komutu(interaction: discord.Interaction):
    await interaction.response.defer(ephemeral=True)
    try:
        embed = discord.Embed(
-           title="? Komut Listesi",
-           description="Botun sahip oldu?u tüm komutlar ve aç?klamalar? a?a??dad?r.",
+           title="📋 Komut Listesi",
+           description="Botun sahip olduğu tüm komutlar ve açıklamaları aşağıdadır.",
            color=0x5865F2
        )
 
        embed.add_field(
-           name="? Seviye Sistemi",
+           name="⭐ Seviye Sistemi",
            value=(
-               "**/seviye [kullan?c?]** - Seviyeni, XP'ni ve mesaj say?n? gösterir.\n"
-               "**/s?ralama** - Sunucudaki ilk 10 ki?inin seviye s?ralamas?n? gösterir.\n"
-               "**/ses [kullan?c?]** - Toplam ses süresini gösterir.\n"
+               "**/seviye [kullanıcı]** - Seviyeni, XP'ni ve mesaj sayını gösterir.\n"
+               "**/sıralama** - Sunucudaki ilk 10 kişinin seviye sıralamasını gösterir.\n"
+               "**/ses [kullanıcı]** - Toplam ses süresini gösterir.\n"
                "**/sesiralama** - Sunucudaki ses süresi sıralamasını gösterir.\n"
-               "**/kart [kullan?c?]** - Futbol kartini, reytingini ve istatistiklerini gosterir.\n"
+               "**/kart [kullanıcı]** - Futbol kartini, reytingini ve istatistiklerini gosterir.\n"
                "**/karttema [foto]** - Kartinin arka plan fotografini ayarlar.\n"
                "**/karttemasil** - Kayitli kart temasini kaldirir.\n"
                "**!köledailyxp** - Günlük XP ödülünü toplar (24 saatte bir).\n"
-               "**/dbdurum** - Seviye veritaban?n?n ve mesaj dinleyicisinin durumunu gösterir."
+               "**/dbdurum** - Seviye veritabanının ve mesaj dinleyicisinin durumunu gösterir."
            ),
            inline=False
        )
 
        embed.add_field(
-           name="? Ekonomi",
+           name="💰 Ekonomi",
            value=(
-               "**/bal [kullan?c?]** - Paran? gösterir.\n"
-               "**/daily** - Günlük para ödülünü al?rs?n.\n"
-               "**/work** - Meslek seçip çal??arak para kazan?rs?n.\n"
-               "**/pay** - Ba?kas?na para gönderirsin.\n"
-               "**/zenginler** - En zengin 10 ki?iyi gösterir.\n"
-               "**/market** - Marketten ürün sat?n al?rs?n.\n"
+               "**/bal [kullanıcı]** - Paranı gösterir.\n"
+               "**/daily** - Günlük para ödülünü alırsın.\n"
+               "**/work** - Meslek seçip çalışarak para kazanırsın.\n"
+               "**/pay** - Başkasına para gönderirsin.\n"
+               "**/zenginler** - En zengin 10 kişiyi gösterir.\n"
+               "**/market** - Marketten ürün satın alırsın.\n"
                "**/envanter** - Envanterini gösterir."
            ),
            inline=False
        )
 
        embed.add_field(
-           name="? Oyunlar",
+           name="🎮 Oyunlar",
            value=(
-               "**/tkm** - Bot ile Ta?, Ka??t, Makas oynars?n.\n"
-               "**/tahmin [say?]** - 1-100 aras? tutulan say?y? tahmin etme oyunu.\n"
-               "**/slot** - Slot makinesini çevirip ?ans?n? denersin.\n"
-               "**/bilgi-yarismasi** - Butonlu genel kültür bilgi yar??mas? ba?lat?r.\n"
-               "**/kasa-ac** - Gizli bir kasa açarak içinden ne ç?kaca??n? görürsün.\n"
-               "**/zardüellosu** - Bot ile zar düellosu yapars?n (büyük atan kazan?r).\n"
-               "**/yazitura** - Klasik yaz? tura atma oyunu."
+               "**/tkm** - Bot ile Taş, Kağıt, Makas oynarsın.\n"
+               "**/tahmin [sayı]** - 1-100 arası tutulan sayıyı tahmin etme oyunu.\n"
+               "**/slot** - Slot makinesini çevirip şansını denersin.\n"
+               "**/bilgi-yarismasi** - Butonlu genel kültür bilgi yarışması başlatır.\n"
+               "**/kasa-ac** - Gizli bir kasa açarak içinden ne çıkacağını görürsün.\n"
+               "**/zardüellosu** - Bot ile zar düellosu yaparsın (büyük atan kazanır).\n"
+               "**/yazitura** - Klasik yazı tura atma oyunu."
            ),
            inline=False
        )
 
        embed.add_field(
-           name="? Yapay Zeka",
-           value="**/ask [soru]** - Yapay zekaya soru sorars?n.",
+           name="🤖 Yapay Zeka",
+           value="**/ask [soru]** - Yapay zekaya soru sorarsın.",
            inline=False
        )
 
        embed.set_footer(text="Sadece sen görebilirsin.")
        await interaction.followup.send(embed=embed, ephemeral=True)
    except Exception as e:
-       print(f"/help hatas?: {e}")
-       await interaction.followup.send("Bir hata olu?tu.", ephemeral=True)
+       print(f"/help hatası: {e}")
+       await interaction.followup.send("Bir hata oluştu.", ephemeral=True)
 
 
 keep_alive()
 
 if __name__ == "__main__":
    if not DISCORD_TOKEN:
-       print("HATA: Discord Token bulunamad?!")
+       print("HATA: Discord Token bulunamadı!")
    else:
-       print("Bot ba?lat?l?yor, 8 saniye bekleniyor (rate limit önlemi)...")
+       print("Bot başlatılıyor, 8 saniye bekleniyor (rate limit önlemi)...")
        time.sleep(8)
        client.run(DISCORD_TOKEN)
