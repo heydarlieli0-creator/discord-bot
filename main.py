@@ -632,11 +632,21 @@ def _kart_resim_indir(url):
     if not url:
         return None
     try:
+        import ssl
+        ctx = ssl.create_default_context()
+        # Bazi hostlarda cert zinciri sorun cikarabiliyor
+        try:
+            ctx.check_hostname = True
+        except Exception:
+            pass
         req = urllib.request.Request(
             url,
-            headers={"User-Agent": "Mozilla/5.0 DiscordFootballCard/2.0"},
+            headers={
+                "User-Agent": "Mozilla/5.0 (compatible; DiscordBot/2.0)",
+                "Accept": "image/png,image/jpeg,image/webp,*/*",
+            },
         )
-        with urllib.request.urlopen(req, timeout=15) as response:
+        with urllib.request.urlopen(req, timeout=15, context=ctx) as response:
             data = response.read()
         return Image.open(io.BytesIO(data)).convert("RGBA")
     except Exception as e:
@@ -704,8 +714,10 @@ def _yuvarlak_avatar(base, avatar, xy, size):
     draw.ellipse((x - 4, y - 4, x + size + 4, y + size + 4), outline=(255, 255, 255, 230), width=4)
 
 
-def futbol_karti_olustur(member, veri, ses_suresi, tema_resmi=None):
-    """Futbol oyuncu karti PNG uretir (BytesIO)."""
+def futbol_karti_olustur(display_name, avatar_url, veri, ses_suresi, tema_resmi=None):
+    """Futbol oyuncu karti PNG uretir (BytesIO).
+    discord.Member thread'e verilmez; isim ve avatar URL string olarak gelir.
+    """
     base = _kart_arkaplan_hazirla(tema_resmi)
     draw = ImageDraw.Draw(base)
 
@@ -725,7 +737,6 @@ def futbol_karti_olustur(member, veri, ses_suresi, tema_resmi=None):
             width=2,
         )
     except Exception:
-        # Eski Pillow: rounded_rectangle yok
         draw.rectangle((16, 16, KART_GENISLIK - 16, KART_YUKSEKLIK - 16), outline=(255, 255, 255, 210), width=5)
         draw.rectangle((32, 32, KART_GENISLIK - 32, KART_YUKSEKLIK - 32), outline=(255, 196, 70, 180), width=2)
 
@@ -735,15 +746,6 @@ def futbol_karti_olustur(member, veri, ses_suresi, tema_resmi=None):
     xp = int(veri.get("xp", 0) or 0)
     sonraki = int(veri.get("sonraki_seviye_xp", 300) or 300)
 
-    # Avatar
-    avatar_url = None
-    try:
-        avatar_url = str(member.display_avatar.replace(size=256, static_format="png"))
-    except Exception:
-        try:
-            avatar_url = str(member.display_avatar.url)
-        except Exception:
-            avatar_url = None
     avatar = _kart_resim_indir(avatar_url) if avatar_url else None
     _yuvarlak_avatar(base, avatar, (62, 90), 190)
 
@@ -751,12 +753,10 @@ def futbol_karti_olustur(member, veri, ses_suresi, tema_resmi=None):
     draw.text((520, 70), str(reyting), font=_kart_font(96, True), fill=(255, 215, 92), anchor="mm")
     draw.text((520, 145), "OVR", font=_kart_font(26, True), fill=(255, 255, 255), anchor="mm")
 
-    # Isim
-    isim = (member.display_name or member.name or "Oyuncu")[:22]
+    isim = (display_name or "Oyuncu")[:22]
     draw.text((62, 310), isim, font=_kart_font(38, True), fill=(255, 255, 255))
     draw.text((62, 355), "COMMUNITY PLAYER", font=_kart_font(18, True), fill=(255, 215, 92))
 
-    # Stat kutulari
     ses_text = saniyeyi_formatla(ses_suresi)
     kutular = [
         ("LEVEL", str(seviye)),
@@ -781,7 +781,6 @@ def futbol_karti_olustur(member, veri, ses_suresi, tema_resmi=None):
         draw.text((KART_GENISLIK - 88, y + 44), deger, font=_kart_font(font_size, True), fill=(255, 255, 255), anchor="rm")
         y += 100
 
-    # Alt serit
     draw.line((62, 870, KART_GENISLIK - 62, 870), fill=(255, 215, 92, 160), width=2)
     draw.text((62, 900), "SWENAX FC", font=_kart_font(22, True), fill=(255, 215, 92))
     draw.text((KART_GENISLIK - 62, 900), "PLAYER CARD", font=_kart_font(20, True), fill=(220, 225, 235), anchor="ra")
@@ -790,6 +789,7 @@ def futbol_karti_olustur(member, veri, ses_suresi, tema_resmi=None):
     base.convert("RGB").save(output, format="PNG", optimize=True)
     output.seek(0)
     return output
+
 
 
 # ================= EKONOMİ SİSTEMİ =================
@@ -1315,19 +1315,39 @@ async def kart(interaction: discord.Interaction, kullanici: discord.Member = Non
             return
 
         hedef = kullanici or interaction.user
+        display_name = hedef.display_name or hedef.name or "Oyuncu"
+
+        # Avatar URL'ini event loop tarafında al (thread-safe degil Member)
+        avatar_url = None
+        try:
+            avatar_url = str(hedef.display_avatar.replace(size=256, static_format="png"))
+        except Exception:
+            try:
+                avatar_url = str(hedef.display_avatar.url)
+            except Exception as e:
+                print(f"Avatar URL alinamadi: {e}")
+
         veri = await asyncio.to_thread(kullanici_verisi_al, interaction.guild_id, hedef.id)
         ses_suresi, _ = await asyncio.to_thread(ses_istatistigi_al, interaction.guild_id, hedef.id)
         tema_data = await asyncio.to_thread(kart_tema_verisi_al, interaction.guild_id, hedef.id)
         tema = await asyncio.to_thread(_kart_resim_bytes_ac, tema_data) if tema_data else None
-        kart_resmi = await asyncio.to_thread(futbol_karti_olustur, hedef, veri, ses_suresi, tema)
+
+        # Saf verilerle render (Member thread'e gitmez)
+        kart_resmi = await asyncio.to_thread(
+            futbol_karti_olustur, display_name, avatar_url, veri, ses_suresi, tema
+        )
 
         await interaction.followup.send(
-            content=f"⚽ **{hedef.display_name}** futbol kartı",
+            content=f"⚽ **{display_name}** futbol kartı",
             file=discord.File(kart_resmi, filename="futbol-karti.png"),
         )
     except Exception as e:
         print(f"/kart hatası: {type(e).__name__}: {e}")
-        await interaction.followup.send("Futbol kartı oluşturulurken bir hata oluştu. Lütfen tekrar dene.")
+        import traceback
+        traceback.print_exc()
+        await interaction.followup.send(
+            f"Futbol kartı oluşturulurken hata: `{type(e).__name__}: {e}`"
+        )
 
 
 @tree.command(name="karttema", description="Futbol kartı arka plan fotoğrafını ayarlar.")
