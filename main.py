@@ -544,128 +544,252 @@ def tum_ses_istatistiklerini_al(guild_id):
 
 KART_GENISLIK = 700
 KART_YUKSEKLIK = 980
+KART_TEMA_MAX_BYTE = 2 * 1024 * 1024  # DB'ye yazmadan once sikistir
 
 
 def kart_tema_verisi_al(guild_id, user_id):
-   if not _db_initialized:
-       init_db()
-   with db_cursor(dict_cursor=True) as (_, cur):
-       veri = _kullanici_satiri_kilitle(cur, guild_id, user_id)
-       return veri.get("kart_tema_data")
+    """Kullanicinin kayitli kart tema baytlarini dondurur."""
+    if not _db_initialized:
+        init_db()
+    with db_cursor(dict_cursor=True) as (_, cur):
+        veri = _kullanici_satiri_kilitle(cur, guild_id, user_id)
+        data = veri.get("kart_tema_data")
+        if data is None:
+            return None
+        if isinstance(data, memoryview):
+            return data.tobytes()
+        return bytes(data) if data else None
 
 
 def kart_tema_kaydet(guild_id, user_id, tema_bytes):
-   if not _db_initialized:
-       init_db()
-   with db_cursor(dict_cursor=True) as (_, cur):
-       _kullanici_satiri_kilitle(cur, guild_id, user_id)
-       cur.execute(
-           "UPDATE seviyeler SET kart_tema_data=%s, kart_tema_url='' WHERE guild_id=%s AND user_id=%s",
-           (psycopg2.Binary(tema_bytes) if tema_bytes else None, str(guild_id), str(user_id))
-       )
+    """Tema fotografini BYTEA olarak kaydeder. None gelirse siler."""
+    if not _db_initialized:
+        init_db()
+    with db_cursor(dict_cursor=True) as (_, cur):
+        _kullanici_satiri_kilitle(cur, guild_id, user_id)
+        if tema_bytes:
+            # Boyutu kontrol et / sikistir
+            tema_bytes = _kart_tema_sikistir(tema_bytes)
+            payload = psycopg2.Binary(tema_bytes)
+        else:
+            payload = None
+        cur.execute(
+            "UPDATE seviyeler SET kart_tema_data=%s, kart_tema_url='' "
+            "WHERE guild_id=%s AND user_id=%s",
+            (payload, str(guild_id), str(user_id)),
+        )
+
+
+def _kart_tema_sikistir(raw_bytes):
+    """Buyuk temalari PNG olarak makul boyuta indirger."""
+    try:
+        img = Image.open(io.BytesIO(raw_bytes)).convert("RGB")
+        img = ImageOps.fit(img, (KART_GENISLIK, KART_YUKSEKLIK), method=Image.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=85, optimize=True)
+        data = buf.getvalue()
+        if len(data) > KART_TEMA_MAX_BYTE:
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=70, optimize=True)
+            data = buf.getvalue()
+        return data
+    except Exception as e:
+        print(f"Tema sikistirilamadi, orijinal kullanilacak: {type(e).__name__}: {e}")
+        if len(raw_bytes) > KART_TEMA_MAX_BYTE:
+            raise ValueError("Fotograf cok buyuk, 2 MB altina dusurulemedi.")
+        return raw_bytes
 
 
 def futbol_reyting_hesapla(veri, ses_suresi):
-   """Mesaj, ses ve seviye istatistiklerinden 40-99 arasi genel reyting."""
-   seviye = int(veri.get("seviye", 1) or 1)
-   mesaj = int(veri.get("mesaj_sayisi", 0) or 0)
-   ses_dakika = int(ses_suresi) // 60
-   reyting = 40
-   reyting += min(20, seviye * 2)
-   reyting += min(20, mesaj // 50)
-   reyting += min(19, ses_dakika // 120)
-   return max(40, min(99, reyting))
+    """Seviye + mesaj + ses suresinden 40-99 arasi OVR reyting."""
+    seviye = int(veri.get("seviye", 1) or 1)
+    mesaj = int(veri.get("mesaj_sayisi", 0) or 0)
+    ses_dakika = max(0, int(ses_suresi)) // 60
+    reyting = 40
+    reyting += min(20, seviye * 2)          # seviye katkisi
+    reyting += min(20, mesaj // 50)         # mesaj katkisi
+    reyting += min(19, ses_dakika // 120)   # ses katkisi (~2 saat = +1)
+    return max(40, min(99, int(reyting)))
 
 
 def _kart_font(size, bold=False):
-   adaylar = [
-       "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-       "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
-   ]
-   for yol in adaylar:
-       if os.path.exists(yol):
-           return ImageFont.truetype(yol, size)
-   return ImageFont.load_default()
+    adaylar = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+        "C:/Windows/Fonts/arialbd.ttf" if bold else "C:/Windows/Fonts/arial.ttf",
+    ]
+    for yol in adaylar:
+        try:
+            if os.path.exists(yol):
+                return ImageFont.truetype(yol, size)
+        except Exception:
+            continue
+    return ImageFont.load_default()
 
 
 def _kart_resim_indir(url):
-   if not url:
-       return None
-   try:
-       req = urllib.request.Request(url, headers={"User-Agent": "DiscordFootballCard/1.0"})
-       with urllib.request.urlopen(req, timeout=12) as response:
-           return Image.open(io.BytesIO(response.read())).convert("RGBA")
-   except Exception as e:
-       print(f"Kart resmi indirilemedi: {type(e).__name__}: {e}")
-       return None
+    if not url:
+        return None
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "Mozilla/5.0 DiscordFootballCard/2.0"},
+        )
+        with urllib.request.urlopen(req, timeout=15) as response:
+            data = response.read()
+        return Image.open(io.BytesIO(data)).convert("RGBA")
+    except Exception as e:
+        print(f"Kart avatar indirilemedi: {type(e).__name__}: {e}")
+        return None
 
 
 def _kart_resim_bytes_ac(data):
-   if not data:
-       return None
-   try:
-       return Image.open(io.BytesIO(bytes(data))).convert("RGBA")
-   except Exception as e:
-       print(f"Kart tema resmi acilamadi: {type(e).__name__}: {e}")
-       return None
+    if not data:
+        return None
+    try:
+        if isinstance(data, memoryview):
+            data = data.tobytes()
+        return Image.open(io.BytesIO(bytes(data))).convert("RGBA")
+    except Exception as e:
+        print(f"Kart tema acilamadi: {type(e).__name__}: {e}")
+        return None
 
 
 def _kart_arkaplan_hazirla(tema):
-   if tema is None:
-       tema = Image.new("RGBA", (KART_GENISLIK, KART_YUKSEKLIK), (22, 24, 32, 255))
-   tema = tema.convert("RGB")
-   tema = ImageOps.fit(tema, (KART_GENISLIK, KART_YUKSEKLIK), method=Image.Resampling.LANCZOS)
-   tema = tema.filter(ImageFilter.GaussianBlur(0.8)).convert("RGBA")
-   tema.alpha_composite(Image.new("RGBA", tema.size, (8, 10, 15, 115)))
-   return tema
+    """Tema yoksa koyu varsayilan arka plan; varsa fit + hafif karartma."""
+    if tema is None:
+        base = Image.new("RGBA", (KART_GENISLIK, KART_YUKSEKLIK), (18, 20, 28, 255))
+        # ustte hafif gradient hissi
+        overlay = Image.new("RGBA", (KART_GENISLIK, KART_YUKSEKLIK), (0, 0, 0, 0))
+        od = ImageDraw.Draw(overlay)
+        for i in range(120):
+            alpha = int(90 * (1 - i / 120))
+            od.rectangle((0, i * 2, KART_GENISLIK, i * 2 + 2), fill=(40, 50, 70, alpha))
+        base = Image.alpha_composite(base, overlay)
+        return base
+
+    tema = tema.convert("RGB")
+    try:
+        resample = Image.Resampling.LANCZOS
+    except AttributeError:
+        resample = Image.LANCZOS
+    tema = ImageOps.fit(tema, (KART_GENISLIK, KART_YUKSEKLIK), method=resample)
+    try:
+        tema = tema.filter(ImageFilter.GaussianBlur(0.6))
+    except Exception:
+        pass
+    tema = tema.convert("RGBA")
+    dark = Image.new("RGBA", tema.size, (8, 10, 16, 130))
+    return Image.alpha_composite(tema, dark)
 
 
 def _yuvarlak_avatar(base, avatar, xy, size):
-   if avatar is None:
-       return
-   avatar = ImageOps.fit(avatar.convert("RGBA"), (size, size), method=Image.Resampling.LANCZOS)
-   maske = Image.new("L", (size, size), 0)
-   ImageDraw.Draw(maske).ellipse((0, 0, size, size), fill=255)
-   base.paste(avatar, xy, maske)
-   draw = ImageDraw.Draw(base)
-   draw.ellipse((xy[0]-5, xy[1]-5, xy[0]+size+5, xy[1]+size+5), outline=(255,255,255,220), width=5)
+    if avatar is None:
+        # placeholder daire
+        draw = ImageDraw.Draw(base)
+        x, y = xy
+        draw.ellipse((x, y, x + size, y + size), fill=(40, 44, 55, 255), outline=(255, 255, 255, 200), width=4)
+        return
+    try:
+        resample = Image.Resampling.LANCZOS
+    except AttributeError:
+        resample = Image.LANCZOS
+    avatar = ImageOps.fit(avatar.convert("RGBA"), (size, size), method=resample)
+    maske = Image.new("L", (size, size), 0)
+    ImageDraw.Draw(maske).ellipse((0, 0, size - 1, size - 1), fill=255)
+    base.paste(avatar, xy, maske)
+    draw = ImageDraw.Draw(base)
+    x, y = xy
+    draw.ellipse((x - 4, y - 4, x + size + 4, y + size + 4), outline=(255, 255, 255, 230), width=4)
 
 
 def futbol_karti_olustur(member, veri, ses_suresi, tema_resmi=None):
-   base = _kart_arkaplan_hazirla(tema_resmi)
-   draw = ImageDraw.Draw(base)
-   draw.rounded_rectangle((18,18,KART_GENISLIK-18,KART_YUKSEKLIK-18), radius=42, outline=(255,255,255,205), width=5, fill=(12,15,22,75))
-   draw.rounded_rectangle((34,34,KART_GENISLIK-34,KART_YUKSEKLIK-34), radius=32, outline=(255,196,70,170), width=2)
+    """Futbol oyuncu karti PNG uretir (BytesIO)."""
+    base = _kart_arkaplan_hazirla(tema_resmi)
+    draw = ImageDraw.Draw(base)
 
-   reyting = futbol_reyting_hesapla(veri, ses_suresi)
-   mesaj = int(veri.get("mesaj_sayisi", 0) or 0)
-   seviye = int(veri.get("seviye", 1) or 1)
-   xp = int(veri.get("xp", 0) or 0)
+    # Dis cerceve
+    try:
+        draw.rounded_rectangle(
+            (16, 16, KART_GENISLIK - 16, KART_YUKSEKLIK - 16),
+            radius=40,
+            outline=(255, 255, 255, 210),
+            width=5,
+            fill=(10, 12, 18, 70),
+        )
+        draw.rounded_rectangle(
+            (32, 32, KART_GENISLIK - 32, KART_YUKSEKLIK - 32),
+            radius=30,
+            outline=(255, 196, 70, 180),
+            width=2,
+        )
+    except Exception:
+        # Eski Pillow: rounded_rectangle yok
+        draw.rectangle((16, 16, KART_GENISLIK - 16, KART_YUKSEKLIK - 16), outline=(255, 255, 255, 210), width=5)
+        draw.rectangle((32, 32, KART_GENISLIK - 32, KART_YUKSEKLIK - 32), outline=(255, 196, 70, 180), width=2)
 
-   avatar = _kart_resim_indir(member.display_avatar.with_size(256).url)
-   _yuvarlak_avatar(base, avatar, (62,95), 190)
+    reyting = futbol_reyting_hesapla(veri, ses_suresi)
+    mesaj = int(veri.get("mesaj_sayisi", 0) or 0)
+    seviye = int(veri.get("seviye", 1) or 1)
+    xp = int(veri.get("xp", 0) or 0)
+    sonraki = int(veri.get("sonraki_seviye_xp", 300) or 300)
 
-   draw.text((520,75), str(reyting), font=_kart_font(92,True), fill=(255,215,92), anchor="mm")
-   draw.text((520,150), "OVR", font=_kart_font(28,True), fill=(255,255,255), anchor="mm")
-   draw.text((62,315), member.display_name[:20], font=_kart_font(40,True), fill=(255,255,255))
-   draw.text((62,362), "COMMUNITY PLAYER", font=_kart_font(20,True), fill=(255,215,92))
+    # Avatar
+    avatar_url = None
+    try:
+        avatar_url = str(member.display_avatar.replace(size=256, static_format="png"))
+    except Exception:
+        try:
+            avatar_url = str(member.display_avatar.url)
+        except Exception:
+            avatar_url = None
+    avatar = _kart_resim_indir(avatar_url) if avatar_url else None
+    _yuvarlak_avatar(base, avatar, (62, 90), 190)
 
-   kutular = [("LEVEL",str(seviye)),("MESSAGES",f"{mesaj:,}"),("VOICE",saniyeyi_formatla(ses_suresi)),("XP",f"{xp:,}")]
-   y=450
-   for baslik,deger in kutular:
-       draw.rounded_rectangle((62,y,KART_GENISLIK-62,y+90), radius=20, fill=(0,0,0,115), outline=(255,255,255,70), width=2)
-       draw.text((85,y+45), baslik, font=_kart_font(22,True), fill=(210,215,225), anchor="lm")
-       draw.text((KART_GENISLIK-85,y+45), deger, font=_kart_font(27 if baslik=="VOICE" else 34,True), fill=(255,255,255), anchor="rm")
-       y += 105
+    # OVR
+    draw.text((520, 70), str(reyting), font=_kart_font(96, True), fill=(255, 215, 92), anchor="mm")
+    draw.text((520, 145), "OVR", font=_kart_font(26, True), fill=(255, 255, 255), anchor="mm")
 
-   draw.line((62,885,KART_GENISLIK-62,885), fill=(255,215,92,150), width=2)
-   draw.text((62,915), "SWENAX FC", font=_kart_font(24,True), fill=(255,215,92))
-   draw.text((KART_GENISLIK-62,915), "PLAYER CARD", font=_kart_font(22,True), fill=(220,225,235), anchor="ra")
+    # Isim
+    isim = (member.display_name or member.name or "Oyuncu")[:22]
+    draw.text((62, 310), isim, font=_kart_font(38, True), fill=(255, 255, 255))
+    draw.text((62, 355), "COMMUNITY PLAYER", font=_kart_font(18, True), fill=(255, 215, 92))
 
-   output=io.BytesIO()
-   base.convert("RGB").save(output, format="PNG", optimize=True)
-   output.seek(0)
-   return output
+    # Stat kutulari
+    ses_text = saniyeyi_formatla(ses_suresi)
+    kutular = [
+        ("LEVEL", str(seviye)),
+        ("MESSAGES", f"{mesaj:,}"),
+        ("VOICE", ses_text),
+        ("XP", f"{xp:,} / {sonraki:,}"),
+    ]
+    y = 430
+    for baslik, deger in kutular:
+        try:
+            draw.rounded_rectangle(
+                (62, y, KART_GENISLIK - 62, y + 88),
+                radius=18,
+                fill=(0, 0, 0, 120),
+                outline=(255, 255, 255, 70),
+                width=2,
+            )
+        except Exception:
+            draw.rectangle((62, y, KART_GENISLIK - 62, y + 88), fill=(0, 0, 0, 120), outline=(255, 255, 255, 70), width=2)
+        draw.text((88, y + 44), baslik, font=_kart_font(20, True), fill=(200, 208, 220), anchor="lm")
+        font_size = 26 if baslik == "VOICE" else 32
+        draw.text((KART_GENISLIK - 88, y + 44), deger, font=_kart_font(font_size, True), fill=(255, 255, 255), anchor="rm")
+        y += 100
+
+    # Alt serit
+    draw.line((62, 870, KART_GENISLIK - 62, 870), fill=(255, 215, 92, 160), width=2)
+    draw.text((62, 900), "SWENAX FC", font=_kart_font(22, True), fill=(255, 215, 92))
+    draw.text((KART_GENISLIK - 62, 900), "PLAYER CARD", font=_kart_font(20, True), fill=(220, 225, 235), anchor="ra")
+
+    output = io.BytesIO()
+    base.convert("RGB").save(output, format="PNG", optimize=True)
+    output.seek(0)
+    return output
 
 
 # ================= EKONOMİ SİSTEMİ =================
@@ -1181,64 +1305,79 @@ async def seviye(interaction: discord.Interaction, kullanici: discord.Member = N
 
 
 
-@tree.command(name="kart", description="Futbol istatistik kartini gosterir.")
-@app_commands.describe(kullanici="Kartini gormek istedigin kisi")
+@tree.command(name="kart", description="Futbol istatistik kartını gösterir.")
+@app_commands.describe(kullanici="Kartını görmek istediğin kişi")
 async def kart(interaction: discord.Interaction, kullanici: discord.Member = None):
-   await interaction.response.defer()
-   try:
-       if interaction.guild_id is None:
-           await interaction.followup.send("Bu komut yalnizca bir sunucuda kullanilabilir.")
-           return
-       hedef=kullanici or interaction.user
-       veri=await asyncio.to_thread(kullanici_verisi_al, interaction.guild_id, hedef.id)
-       ses_suresi,_=await asyncio.to_thread(ses_istatistigi_al, interaction.guild_id, hedef.id)
-       tema_data=await asyncio.to_thread(kart_tema_verisi_al, interaction.guild_id, hedef.id)
-       tema=await asyncio.to_thread(_kart_resim_bytes_ac, tema_data) if tema_data else None
-       kart_resmi=await asyncio.to_thread(futbol_karti_olustur, hedef, veri, ses_suresi, tema)
-       await interaction.followup.send(content=f"⚽ **{hedef.display_name}** futbol karti", file=discord.File(kart_resmi, filename="futbol-karti.png"))
-   except Exception as e:
-       print(f"/kart hatasi: {type(e).__name__}: {e}")
-       await interaction.followup.send("Futbol karti olusturulurken bir hata olustu.")
+    await interaction.response.defer()
+    try:
+        if interaction.guild_id is None:
+            await interaction.followup.send("Bu komut yalnızca bir sunucuda kullanılabilir.")
+            return
+
+        hedef = kullanici or interaction.user
+        veri = await asyncio.to_thread(kullanici_verisi_al, interaction.guild_id, hedef.id)
+        ses_suresi, _ = await asyncio.to_thread(ses_istatistigi_al, interaction.guild_id, hedef.id)
+        tema_data = await asyncio.to_thread(kart_tema_verisi_al, interaction.guild_id, hedef.id)
+        tema = await asyncio.to_thread(_kart_resim_bytes_ac, tema_data) if tema_data else None
+        kart_resmi = await asyncio.to_thread(futbol_karti_olustur, hedef, veri, ses_suresi, tema)
+
+        await interaction.followup.send(
+            content=f"⚽ **{hedef.display_name}** futbol kartı",
+            file=discord.File(kart_resmi, filename="futbol-karti.png"),
+        )
+    except Exception as e:
+        print(f"/kart hatası: {type(e).__name__}: {e}")
+        await interaction.followup.send("Futbol kartı oluşturulurken bir hata oluştu. Lütfen tekrar dene.")
 
 
-@tree.command(name="karttema", description="Futbol kartinda kullanilacak tema fotografini ayarlar.")
-@app_commands.describe(foto="Kartinin arka planinda kullanilacak fotograf")
+@tree.command(name="karttema", description="Futbol kartı arka plan fotoğrafını ayarlar.")
+@app_commands.describe(foto="Kartın arka planında kullanılacak fotoğraf")
 async def karttema(interaction: discord.Interaction, foto: discord.Attachment):
-   await interaction.response.defer(ephemeral=True)
-   try:
-       if interaction.guild_id is None:
-           await interaction.followup.send("Bu komut yalnizca bir sunucuda kullanilabilir.", ephemeral=True)
-           return
-       izinli={"image/png","image/jpeg","image/webp","image/gif"}
-       if foto.content_type not in izinli:
-           await interaction.followup.send("Lutfen PNG, JPG, WEBP veya GIF bir fotograf yukle.", ephemeral=True)
-           return
-       if foto.size > 8*1024*1024:
-           await interaction.followup.send("Fotograf 8 MB'dan kucuk olmali.", ephemeral=True)
-           return
-       tema_bytes = await foto.read()
-       if not tema_bytes:
-           await interaction.followup.send("Fotograf okunamadi. Lutfen tekrar yukle.", ephemeral=True)
-           return
-       await asyncio.to_thread(kart_tema_kaydet, interaction.guild_id, interaction.user.id, tema_bytes)
-       await interaction.followup.send("✅ Kart temanin kalici olarak kaydedildi. Artik **/kart** yazdiginda bu fotograf arka plan olacak.", ephemeral=True)
-   except Exception as e:
-       print(f"/karttema hatasi: {type(e).__name__}: {e}")
-       await interaction.followup.send("Kart temasi kaydedilirken bir hata olustu.", ephemeral=True)
+    await interaction.response.defer(ephemeral=True)
+    try:
+        if interaction.guild_id is None:
+            await interaction.followup.send("Bu komut yalnızca bir sunucuda kullanılabilir.", ephemeral=True)
+            return
+
+        izinli = {"image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"}
+        ctype = (foto.content_type or "").lower()
+        if ctype not in izinli and not (foto.filename or "").lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".gif")):
+            await interaction.followup.send("Lütfen PNG, JPG, WEBP veya GIF bir fotoğraf yükle.", ephemeral=True)
+            return
+
+        if foto.size and foto.size > 8 * 1024 * 1024:
+            await interaction.followup.send("Fotoğraf 8 MB'dan küçük olmalı.", ephemeral=True)
+            return
+
+        tema_bytes = await foto.read()
+        if not tema_bytes:
+            await interaction.followup.send("Fotoğraf okunamadı. Lütfen tekrar yükle.", ephemeral=True)
+            return
+
+        await asyncio.to_thread(kart_tema_kaydet, interaction.guild_id, interaction.user.id, tema_bytes)
+        await interaction.followup.send(
+            "✅ Kart teman kalıcı olarak kaydedildi. Artık **/kart** yazdığında bu fotoğraf arka plan olacak.",
+            ephemeral=True,
+        )
+    except ValueError as e:
+        await interaction.followup.send(f"❌ {e}", ephemeral=True)
+    except Exception as e:
+        print(f"/karttema hatası: {type(e).__name__}: {e}")
+        await interaction.followup.send("Kart teması kaydedilirken bir hata oluştu.", ephemeral=True)
 
 
-@tree.command(name="karttemasil", description="Kaydettigin futbol karti temasini kaldirir.")
+@tree.command(name="karttemasil", description="Kayıtlı futbol kartı temasını kaldırır.")
 async def karttemasil(interaction: discord.Interaction):
-   await interaction.response.defer(ephemeral=True)
-   try:
-       if interaction.guild_id is None:
-           await interaction.followup.send("Bu komut yalnizca bir sunucuda kullanilabilir.", ephemeral=True)
-           return
-       await asyncio.to_thread(kart_tema_kaydet, interaction.guild_id, interaction.user.id, None)
-       await interaction.followup.send("✅ Kart temasi kaldirildi. Varsayilan tema kullanilacak.", ephemeral=True)
-   except Exception as e:
-       print(f"/karttemasil hatasi: {type(e).__name__}: {e}")
-       await interaction.followup.send("Kart temasi kaldirilirken bir hata olustu.", ephemeral=True)
+    await interaction.response.defer(ephemeral=True)
+    try:
+        if interaction.guild_id is None:
+            await interaction.followup.send("Bu komut yalnızca bir sunucuda kullanılabilir.", ephemeral=True)
+            return
+        await asyncio.to_thread(kart_tema_kaydet, interaction.guild_id, interaction.user.id, None)
+        await interaction.followup.send("✅ Kart teması kaldırıldı. Varsayılan tema kullanılacak.", ephemeral=True)
+    except Exception as e:
+        print(f"/karttemasil hatası: {type(e).__name__}: {e}")
+        await interaction.followup.send("Kart teması kaldırılırken bir hata oluştu.", ephemeral=True)
 
 
 @tree.command(name="ses", description="Ses kanalinda ne kadar kaldigini gosterir.")
