@@ -52,7 +52,7 @@ intents.voice_states = True
 intents.guilds = True
 intents.members = True
 
-client = discord.Client(intents=intents)
+client = discord.Client(intents=intents, proxy="http://185.199.229.156:7492")
 tree = app_commands.CommandTree(client)
 
 aktif_oyunlar = {}
