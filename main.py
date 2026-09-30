@@ -2121,8 +2121,8 @@ async def help_komutu(interaction: discord.Interaction):
    except Exception as e:
        print(f"/help hatası: {e}")
        await interaction.followup.send("Bir hata oluştu.", ephemeral=True)
-
-# ================= ÇEKİLİŞ SİSTEMİ (mevcut koda dokunulmaz) =================
+      # ================= ÇEKİLİŞ SİSTEMİ =================
+from datetime import datetime, timedelta, timezone
 
 aktif_cekilisler = {}  # message_id -> dict
 _cekilis_lock = asyncio.Lock()
@@ -2146,15 +2146,9 @@ def _sure_formatla(saniye: int) -> str:
 
 
 class CekilisKatilView(discord.ui.View):
-    """Butonlu çekiliş katılımı. timeout=None → bot restart sonrası da çalışır."""
-
-    def __init__(self, message_id: int | None = None):
+    def __init__(self, message_id=None):
         super().__init__(timeout=None)
         self.message_id = message_id
-        # custom_id sabit kalmalı (persistent view)
-        for item in self.children:
-            if isinstance(item, discord.ui.Button) and item.custom_id is None:
-                item.custom_id = "cekilis:katil"
 
     @discord.ui.button(
         label="🎉 Katıl",
@@ -2188,11 +2182,9 @@ class CekilisKatilView(discord.ui.View):
                 "✅ Çekilişe katıldın! Bol şans 🍀", ephemeral=True
             )
 
-        # Katılımcı sayısını embed'de güncelle
         try:
-            embed = interaction.message.embeds[0] if interaction.message.embeds else None
-            if embed:
-                yeni = embed.copy()
+            if interaction.message and interaction.message.embeds:
+                yeni = interaction.message.embeds[0].copy()
                 for i, field in enumerate(yeni.fields):
                     if field.name == "👥 Katılımcı":
                         yeni.set_field_at(
@@ -2204,13 +2196,11 @@ class CekilisKatilView(discord.ui.View):
                         break
                 await interaction.message.edit(embed=yeni, view=self)
         except Exception as e:
-            print(f"Çekiliş embed güncelleme hatası: {e}")
+            print(f"Çekiliş embed güncelleme: {e}")
 
 
 class CekilisListeView(discord.ui.View):
-    """Aktif çekiliş listesi için sayfalama (pages uyumlu)."""
-
-    def __init__(self, embeds: list[discord.Embed], author_id: int):
+    def __init__(self, embeds, author_id):
         super().__init__(timeout=120)
         self.embeds = embeds
         self.author_id = author_id
@@ -2248,7 +2238,6 @@ class CekilisListeView(discord.ui.View):
 
 
 async def _cekilis_bitir(message_id: int, erken: bool = False):
-    """Çekilişi bitirir, kazananları çeker ve mesajı günceller."""
     async with _cekilis_lock:
         cekilis = aktif_cekilisler.get(message_id)
         if not cekilis or cekilis.get("bitti"):
@@ -2278,6 +2267,7 @@ async def _cekilis_bitir(message_id: int, erken: bool = False):
         sonuc_metin = f"🎉 **Kazananlar:** {mentionlar}"
     else:
         sonuc_metin = "😢 Kimse katılmadığı için kazanan yok."
+        mentionlar = ""
 
     durum = "erken bitirildi" if erken else "süresi doldu"
 
@@ -2294,7 +2284,6 @@ async def _cekilis_bitir(message_id: int, erken: bool = False):
     embed.add_field(name="🏆 Kazanan Sayısı", value=str(kazanan_sayisi), inline=True)
     embed.set_footer(text=f"Çekiliş ID: {message_id}")
 
-    # Butonları devre dışı bırak
     view = CekilisKatilView(message_id)
     for item in view.children:
         item.disabled = True
@@ -2303,24 +2292,21 @@ async def _cekilis_bitir(message_id: int, erken: bool = False):
         try:
             await mesaj.edit(embed=embed, view=view)
         except Exception as e:
-            print(f"Çekiliş mesaj güncelleme hatası: {e}")
+            print(f"Çekiliş mesaj güncelleme: {e}")
             if kanal:
                 await kanal.send(embed=embed)
     elif kanal:
         await kanal.send(embed=embed)
 
-    # Kazananları ayrıca etiketle
     if kanal and kazananlar:
         await kanal.send(
             f"🎊 Tebrikler {mentionlar}! **{cekilis['odul']}** ödülünü kazandınız!"
         )
 
-    # Bellekten temizle (isteğe bağlı tutmak istersen silme)
     aktif_cekilisler.pop(message_id, None)
 
 
 async def _cekilis_zamanlayici(message_id: int, bitis_ts: float):
-    """Süre dolunca çekilişi otomatik bitirir."""
     kalan = bitis_ts - time.time()
     if kalan > 0:
         await asyncio.sleep(kalan)
@@ -2333,7 +2319,6 @@ async def _cekilis_zamanlayici(message_id: int, bitis_ts: float):
     sure_dakika="Kaç dakika sürecek (1-10080)",
     kazanan="Kaç kişi kazanacak (1-20)",
 )
-@app_commands.default_permissions(manage_guild=True)
 async def cekilis(
     interaction: discord.Interaction,
     odul: str,
@@ -2351,9 +2336,8 @@ async def cekilis(
             return
 
         bitis_ts = time.time() + (sure_dakika * 60)
-        bitis_str = discord.utils.format_dt(
-            discord.utils.utcnow() + discord.timedelta(minutes=sure_dakika), "R"
-        )
+        bitis_dt = datetime.now(timezone.utc) + timedelta(minutes=sure_dakika)
+        bitis_str = discord.utils.format_dt(bitis_dt, "R")
 
         embed = discord.Embed(
             title="🎉 ÇEKİLİŞ BAŞLADI!",
@@ -2372,9 +2356,12 @@ async def cekilis(
         view = CekilisKatilView()
         mesaj = await interaction.followup.send(embed=embed, view=view, wait=True)
 
-        # View'e gerçek message_id'yi ver
         view.message_id = mesaj.id
-        # custom_id zaten sabit; restart sonrası add_view ile dinlenecek
+        # Bot restart sonrası buton çalışsın
+        try:
+            client.add_view(view, message_id=mesaj.id)
+        except Exception:
+            pass
 
         aktif_cekilisler[mesaj.id] = {
             "odul": odul,
@@ -2388,17 +2375,19 @@ async def cekilis(
             "message_id": mesaj.id,
         }
 
-        # Otomatik bitiş görevi
         asyncio.create_task(_cekilis_zamanlayici(mesaj.id, bitis_ts))
 
     except Exception as e:
         print(f"/cekilis hatası: {type(e).__name__}: {e}")
-        await interaction.followup.send("Çekiliş başlatılırken bir hata oluştu.")
+        import traceback
+        traceback.print_exc()
+        await interaction.followup.send(
+            f"Çekiliş başlatılırken hata: `{type(e).__name__}: {e}`"
+        )
 
 
 @tree.command(name="cekilisbitir", description="Aktif bir çekilişi erken bitirir.")
 @app_commands.describe(mesaj_id="Bitirmek istediğin çekiliş mesajının ID'si")
-@app_commands.default_permissions(manage_guild=True)
 async def cekilisbitir(interaction: discord.Interaction, mesaj_id: str):
     await interaction.response.defer(ephemeral=True)
     try:
@@ -2418,7 +2407,7 @@ async def cekilisbitir(interaction: discord.Interaction, mesaj_id: str):
         await interaction.followup.send("✅ Çekiliş erken bitirildi.", ephemeral=True)
     except Exception as e:
         print(f"/cekilisbitir hatası: {e}")
-        await interaction.followup.send("Bir hata oluştu.", ephemeral=True)
+        await interaction.followup.send(f"Hata: `{e}`", ephemeral=True)
 
 
 @tree.command(name="cekilisler", description="Aktif çekilişleri sayfalı olarak listeler.")
@@ -2441,7 +2430,6 @@ async def cekilisler(interaction: discord.Interaction):
             await interaction.followup.send("Şu an aktif çekiliş yok.", ephemeral=True)
             return
 
-        # Her sayfada 1 çekiliş (temiz görünüm)
         embeds = []
         for i, (mid, data) in enumerate(aktifler, 1):
             kalan = max(0, int(data["bitis_ts"] - time.time()))
@@ -2459,9 +2447,7 @@ async def cekilisler(interaction: discord.Interaction):
             embed.add_field(
                 name="⏱️ Kalan süre", value=_sure_formatla(kalan), inline=True
             )
-            embed.add_field(
-                name="🆔 Mesaj ID", value=f"`{mid}`", inline=False
-            )
+            embed.add_field(name="🆔 Mesaj ID", value=f"`{mid}`", inline=False)
             embed.set_footer(text="Erken bitirmek için /cekilisbitir kullan")
             embeds.append(embed)
 
@@ -2474,24 +2460,8 @@ async def cekilisler(interaction: discord.Interaction):
             )
     except Exception as e:
         print(f"/cekilisler hatası: {e}")
-        await interaction.followup.send("Bir hata oluştu.", ephemeral=True)
-
-
-# Bot restart sonrası butonların çalışması için persistent view kaydı
-# on_ready içine eklenmemesi için burada client hazır olunca kaydediyoruz
-_original_on_ready = on_ready
-
-
-@client.event
-async def on_ready():
-    await _original_on_ready()
-    # Persistent view: bot yeniden başlasa bile "Katıl" butonu dinlenir
-    try:
-        client.add_view(CekilisKatilView())
-        print("✅ Çekiliş persistent view kaydedildi")
-    except Exception as e:
-        print(f"Çekiliş view kaydı hatası: {e}")
-      
+        await interaction.followup.send(f"Hata: `{e}`", ephemeral=True)
+       
 keep_alive()
 
 if __name__ == "__main__":
