@@ -1253,34 +1253,32 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
    except:
        pass
 
-
 @tree.command(name="ask", description="Yapay zekaya soru sorarsın.")
 @app_commands.describe(soru="Sorulacak soru")
 async def ask(interaction: discord.Interaction, soru: str):
-   await interaction.response.defer()
-   try:
-       if not groq_client:
-           await interaction.followup.send("Groq API anahtarı bulunamadı!")
-           return
+    await interaction.response.defer()
+    try:
+        if not groq_client:
+            await interaction.followup.send("Groq API anahtarı bulunamadı!")
+            return
 
-       chat_completion = groq_client.chat.completions.create(
-           model="openai/gpt-oss-20b",
-           messages=[
-               {
-                   "role": "system",
-                   "content": "Sen kibar, tarafsız, net ve profesyonel bir Discord asistanısın. Aşırı samimi hitaplar kullanma, küfür etme, doğrudan ve anlaşılır cevaplar ver."
-               },
-               {"role": "user", "content": soru},
-           ],
-       )
+        chat_completion = groq_client.chat.completions.create(
+            model="openai/gpt-oss-20b",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "Sen kibar, tarafsız, net ve profesyonel bir Discord asistanısın. Aşırı samimi hitaplar kullanma, küfür etme, doğrudan ve anlaşılır cevaplar ver."
+                },
+                {"role": "user", "content": soru},
+            ],
+        )
         response_text = chat_completion.choices[0].message.content
         if len(response_text) > 2000:
             response_text = response_text[:1997] + "\n..."
         await interaction.followup.send(response_text)
     except Exception as e:
-       print(f"/ask hatası: {e}")
-       await interaction.followup.send(f"Bir hata oluştu: {e}")
-
+        print(f"/ask hatası: {e}")
+        await interaction.followup.send(f"Bir hata oluştu: {e}")
 
 @tree.command(name="seviye", description="Seviyeni, XP'ni ve mesaj sayını gösterir.")
 @app_commands.describe(kullanici="Seviyesini görmek istediğin kişi (boş bırakırsan kendini gösterir)")
