@@ -1273,8 +1273,8 @@ async def ask(interaction: discord.Interaction, soru: str):
                {"role": "user", "content": soru},
            ],
        )
-       response_text = chat_completion.choices[0].message.content
-       if len(response_text) > 2000:
+     if len(response_text) > 4000:
+    response_text = response_text[:3993] + "\n..."
            response_text = response_text[:1993] + "\n..."
        await interaction.followup.send(response_text)
    except Exception as e:
