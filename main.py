@@ -1273,7 +1273,6 @@ async def ask(interaction: discord.Interaction, soru: str):
                {"role": "user", "content": soru},
            ],
        )
-             )
         response_text = chat_completion.choices[0].message.content
         if len(response_text) > 2000:
             response_text = response_text[:1997] + "\n..."
