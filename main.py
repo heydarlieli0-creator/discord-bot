@@ -1273,11 +1273,12 @@ async def ask(interaction: discord.Interaction, soru: str):
                {"role": "user", "content": soru},
            ],
        )
-     response_text = chat_completion.choices[0].message.content
-if len(response_text) > 2000:
-    response_text = response_text[:1997] + "\n..."
-       await interaction.followup.send(response_text)
-   except Exception as e:
+             )
+        response_text = chat_completion.choices[0].message.content
+        if len(response_text) > 2000:
+            response_text = response_text[:1997] + "\n..."
+        await interaction.followup.send(response_text)
+    except Exception as e:
        print(f"/ask hatası: {e}")
        await interaction.followup.send(f"Bir hata oluştu: {e}")
 
