@@ -1275,7 +1275,6 @@ async def ask(interaction: discord.Interaction, soru: str):
        )
      if len(response_text) > 4000:
     response_text = response_text[:3993] + "\n..."
-           response_text = response_text[:1993] + "\n..."
        await interaction.followup.send(response_text)
    except Exception as e:
        print(f"/ask hatası: {e}")
